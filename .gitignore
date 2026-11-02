@@ -1,0 +1,31 @@
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node / Next
+node_modules/
+.next/
+npm-debug.log*
+
+# Rust
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# TEMP BACKOFFICE MUST NEVER ENTER GIT
+backoffice-temp/
+**/backoffice-temp/
+mvp/backoffice-temp/
+**/mvp/backoffice-temp/
