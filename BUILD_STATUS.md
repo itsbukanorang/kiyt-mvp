@@ -1,13 +1,13 @@
 # Status build KIYT
 
 Sumber scope: MVP_BUILD_PLAN.md + ARCHITECTURE_RUST_PYTHON.md.
-Status terakhir: 2026-11-03 04:28:06 WIB.
+Status terakhir: 2026-11-03 04:35:36 WIB.
 
 | Modul | Status | Bukti terakhir | Dependency / kebutuhan |
 |---|---|---|---|
 | 0 Audit VPS | PASS | VPS srv2068231, Docker, Apache, service existing, port dan isolation boundary diverifikasi | — |
 | 1 Console shell + Rust/Python foundation | PASS | console.kiyt.io HTTPS; Next.js → Rust /api/v1 → authenticated private Python; isolation/regression PASS | — |
-| 2 PostgreSQL + Qdrant | NOT_STARTED | — | Modul 1 PASS |
+| 2 PostgreSQL + Qdrant | PASS | PostgreSQL + Qdrant dedicated/private; auth, persistence, least-privilege role, restart, volume dan no-public-port PASS | — |
 | 3 Member auth | NOT_STARTED | — | Modul 2 |
 | 4 Workspace + API key | NOT_STARTED | — | Modul 3 |
 | 5 Cognition pertama | NOT_STARTED | — | Modul 4 + Meta muse-spark-1.3 Standard |
@@ -70,3 +70,46 @@ public `/api/v1/*` melewati Rust dan Python tetap private.
 ### Langkah berikut
 
 Modul 2 — PostgreSQL + Qdrant dedicated, private dan persistent.
+
+
+## Modul 2 — PASS
+
+### PostgreSQL
+
+- Dedicated KIYT PostgreSQL menggunakan image `postgres:17.11-bookworm`.
+- Database operasional: `kiyt`.
+- Application role: `kiyt_app`.
+- `kiyt_app` LOGIN aktif dan bukan superuser, bukan CREATEDB, bukan CREATEROLE.
+- Application role dapat membuat/menulis object pada database KIYT.
+- Data probe bertahan setelah container restart.
+- Named volume: `kiyt-mvp-postgres-data`.
+- Tidak ada PostgreSQL host/public port.
+- Bootstrap role/database berada di `deploy/postgres/00-bootstrap.sh`.
+
+### Qdrant
+
+- Dedicated KIYT Qdrant menggunakan image `qdrant/qdrant:v1.20.0`.
+- API key wajib; request tanpa key menghasilkan HTTP 401.
+- Runtime Python dapat mengakses Qdrant melalui private Docker DNS/network.
+- Test vector/payload bertahan setelah Qdrant restart.
+- Named volume: `kiyt-mvp-qdrant-data`.
+- Tidak ada Qdrant host/public port.
+- Test collection Module 2 sudah dihapus setelah verification.
+
+### Secrets
+
+- PostgreSQL credential berada di `/home/kiyt-mvp/private/postgres.env`.
+- Qdrant credential berada di `/home/kiyt-mvp/private/qdrant.env`.
+- Secret files tidak disimpan di repository dan tidak dicetak pada build log.
+- KIYT datastore tidak menggunakan PostgreSQL/Qdrant milik FLWME.
+
+### Belum selesai
+
+- Better Auth schema/session belum dipasang.
+- Application schema workspace/API key/run belum dibuat.
+- Runtime belum menggunakan Qdrant untuk production memory collections.
+- Meta cognition belum dihubungkan.
+
+### Langkah berikut
+
+Modul 3 — Better Auth email/password dengan PostgreSQL KIYT.
