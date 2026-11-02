@@ -1,14 +1,43 @@
-export default function MyAccount() {
-  return (
-    <main className="min-h-screen bg-black p-8 text-white">
-      <div className="mx-auto max-w-5xl">
-        <p className="text-sm text-zinc-500">KIYT Console</p>
-        <h1 className="mt-3 text-3xl font-semibold">My Account</h1>
+import {
+  headers,
+} from "next/headers";
 
-        <p className="mt-4 text-zinc-400">
-          Authentication and private workspace access are not enabled yet.
-        </p>
-      </div>
+import {
+  redirect,
+} from "next/navigation";
+
+import { auth } from "@/lib/auth";
+
+import LogoutButton from "./logout-button";
+
+export const dynamic =
+  "force-dynamic";
+
+export default async function MyAccount() {
+  const session =
+    await auth.api.getSession({
+      headers:
+        await headers(),
+    });
+
+  if (!session) {
+    redirect("/");
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
+      <p>
+        Email :{" "}
+        <strong>
+          {session.user.email}
+        </strong>{" "}
+        Login Success{" "}
+        <span className="ml-2">
+          [
+          <LogoutButton />
+          ]
+        </span>
+      </p>
     </main>
   );
 }

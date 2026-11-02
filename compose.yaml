@@ -25,6 +25,9 @@ services:
 
     restart: unless-stopped
 
+    env_file:
+      - /home/kiyt-mvp/private/console.env
+
     expose:
       - "3000"
 
