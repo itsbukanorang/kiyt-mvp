@@ -1,9 +1,7 @@
-import {
-  ConsolePage,
-} from "@/components/dashboard/console-pages";
+import PlaygroundClient from "./playground-client";
 
 export default function Page() {
   return (
-    <ConsolePage kind="playground" />
+    <PlaygroundClient />
   );
 }

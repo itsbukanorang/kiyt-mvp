@@ -46,6 +46,7 @@ function targetFor(
     path[0] === "runs" &&
     (
       path[2] === "observations" ||
+      path[2] === "inputs" ||
       path[2] === "feedback"
     )
   ) {

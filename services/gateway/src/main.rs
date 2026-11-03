@@ -574,6 +574,86 @@ fn validate_observation_payload(
 }
 
 
+
+fn validate_input_payload(
+    payload: Value,
+) -> Result<Value, ApiResponse> {
+    let object =
+        payload.as_object().ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_input_payload",
+            )
+        })?;
+
+    let decision_id = object
+        .get("decision_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "input_decision_id_required",
+            )
+        })?;
+
+    let input_id = object
+        .get("input_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "input_id_required",
+            )
+        })?;
+
+    if decision_id.len() > 128
+        || input_id.len() > 128
+    {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_input_identifier",
+        ));
+    }
+
+    let data = object
+        .get("data")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "input_data_object_required",
+            )
+        })?;
+
+    let normalized = json!({
+        "decision_id": decision_id,
+        "input_id": input_id,
+        "data": data,
+    });
+
+    let encoded =
+        serde_json::to_vec(&normalized)
+            .map_err(|_| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_input_payload",
+                )
+            })?;
+
+    if encoded.len() > 1_000_000 {
+        return Err(api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "input_payload_too_large",
+        ));
+    }
+
+    Ok(normalized)
+}
+
 fn validate_feedback_payload(
     payload: Value,
 ) -> Result<Value, ApiResponse> {
@@ -718,6 +798,7 @@ async fn load_run_json(
             r.updated_at::text AS updated_at,
             r.completed_at::text AS completed_at,
 
+            d.id AS decision_id,
             d.decision_json::text AS decision_json,
             d.provider_name,
             d.model,
@@ -775,6 +856,9 @@ async fn load_run_json(
     let completed_at: Option<String> =
         row.try_get("completed_at")?;
 
+    let decision_id: Option<String> =
+        row.try_get("decision_id")?;
+
     let decision_text: Option<String> =
         row.try_get("decision_json")?;
 
@@ -790,13 +874,33 @@ async fn load_run_json(
     let provider_response_id: Option<String> =
         row.try_get("provider_response_id")?;
 
-    let decision =
+    let mut decision =
         decision_text.and_then(|text| {
             serde_json::from_str::<Value>(
                 &text
             )
             .ok()
         });
+
+    if let (
+        Some(Value::Object(object)),
+        Some(decision_id),
+    ) = (
+        &mut decision,
+        decision_id.as_ref(),
+    ) {
+        object.insert(
+            "run_id".to_owned(),
+            Value::String(id.clone()),
+        );
+
+        object.insert(
+            "decision_id".to_owned(),
+            Value::String(
+                decision_id.clone()
+            ),
+        );
+    }
 
     let usage_rows = sqlx::query(
         r#"
@@ -1822,6 +1926,539 @@ async fn create_observation(
 }
 
 
+
+async fn create_input(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> ApiResponse {
+    let workspace_id =
+        match authenticate_workspace(
+            &headers,
+            &state,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let idempotency_key =
+        match read_idempotency_key(
+            &headers,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let payload =
+        match validate_input_payload(
+            payload
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let request_json =
+        match serde_json::to_string(
+            &payload
+        ) {
+            Ok(value) => value,
+            Err(_) => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_input_payload",
+                );
+            }
+        };
+
+    let request_hash =
+        sha256_hex(&request_json);
+
+    let requested_decision_id =
+        payload
+            .get("decision_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+    let requested_input_id =
+        payload
+            .get("input_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+    let input_json =
+        match serde_json::to_string(
+            &payload["data"]
+        ) {
+            Ok(value) => value,
+            Err(_) => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_input_payload",
+                );
+            }
+        };
+
+    let input_id =
+        deterministic_id(
+            "inp",
+            &format!(
+                "{workspace_id}\0{run_id}\0{requested_input_id}"
+            ),
+        );
+
+    let mut tx =
+        match state.db.begin().await {
+            Ok(value) => value,
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "input_store_unavailable",
+                );
+            }
+        };
+
+    let existing =
+        sqlx::query_as::<
+            _,
+            (String, String, i32),
+        >(
+            r#"
+            SELECT
+                id,
+                request_hash,
+                sequence
+            FROM run_inputs
+            WHERE run_id = $1
+              AND workspace_id = $2
+              AND idempotency_key = $3
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .bind(&idempotency_key)
+        .fetch_optional(&mut *tx)
+        .await;
+
+    let existing =
+        match existing {
+            Ok(value) => value,
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "input_store_unavailable",
+                );
+            }
+        };
+
+    if let Some((
+        existing_id,
+        existing_hash,
+        existing_sequence,
+    )) = existing
+    {
+        if existing_hash != request_hash {
+            return api_error(
+                StatusCode::CONFLICT,
+                "idempotency_key_payload_conflict",
+            );
+        }
+
+        if tx.commit().await.is_err() {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "input_store_unavailable",
+            );
+        }
+
+        let run =
+            match load_run_json(
+                &state.db,
+                &workspace_id,
+                &run_id,
+            )
+            .await
+            {
+                Ok(Some(value)) => value,
+                Ok(None) => {
+                    return api_error(
+                        StatusCode::NOT_FOUND,
+                        "run_not_found",
+                    );
+                }
+                Err(_) => {
+                    return api_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "run_store_unavailable",
+                    );
+                }
+            };
+
+        let status =
+            run.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+
+        let response_status =
+            if pending_status(status) {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            };
+
+        return (
+            response_status,
+            Json(json!({
+                "run_id": &run_id,
+                "operation_id":
+                    deterministic_id(
+                        "op",
+                        &format!(
+                            "{run_id}:{}",
+                            existing_sequence + 1
+                        ),
+                    ),
+                "status": status,
+                "idempotent_replay": true,
+                "input": {
+                    "id": existing_id,
+                },
+                "run": run,
+            })),
+        );
+    }
+
+    let run_row =
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                Option<String>,
+                Option<i32>,
+                Option<String>,
+            ),
+        >(
+            r#"
+            SELECT
+                r.status,
+                d.id,
+                d.sequence,
+                d.decision_json::text
+            FROM runs r
+
+            LEFT JOIN LATERAL (
+                SELECT
+                    id,
+                    sequence,
+                    decision_json
+                FROM decisions
+                WHERE run_id = r.id
+                  AND workspace_id =
+                      r.workspace_id
+                ORDER BY sequence DESC
+                LIMIT 1
+            ) d ON true
+
+            WHERE r.id = $1
+              AND r.workspace_id = $2
+
+            FOR UPDATE OF r
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .fetch_optional(&mut *tx)
+        .await;
+
+    let run_row =
+        match run_row {
+            Ok(Some(value)) => value,
+
+            Ok(None) => {
+                return api_error(
+                    StatusCode::NOT_FOUND,
+                    "run_not_found",
+                );
+            }
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "input_store_unavailable",
+                );
+            }
+        };
+
+    if run_row.0 != "needs_input" {
+        return api_error(
+            StatusCode::CONFLICT,
+            "run_not_awaiting_input",
+        );
+    }
+
+    let decision_id =
+        match run_row.1 {
+            Some(value) => value,
+
+            None => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "run_has_no_decision",
+                );
+            }
+        };
+
+    if requested_decision_id
+        != decision_id
+    {
+        return api_error(
+            StatusCode::CONFLICT,
+            "input_decision_mismatch",
+        );
+    }
+
+    let decision_sequence =
+        match run_row.2 {
+            Some(value) if value > 0 =>
+                value,
+
+            _ => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "run_has_no_decision",
+                );
+            }
+        };
+
+    let decision_json =
+        match run_row.3
+            .and_then(|value| {
+                serde_json::from_str::<Value>(
+                    &value
+                )
+                .ok()
+            })
+        {
+            Some(value) => value,
+
+            None => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "run_decision_invalid",
+                );
+            }
+        };
+
+    if decision_json
+        .get("status")
+        .and_then(Value::as_str)
+        != Some("needs_input")
+    {
+        return api_error(
+            StatusCode::CONFLICT,
+            "decision_not_awaiting_input",
+        );
+    }
+
+    let inserted =
+        sqlx::query(
+            r#"
+            INSERT INTO run_inputs (
+                id,
+                run_id,
+                workspace_id,
+                sequence,
+                decision_id,
+                input_json,
+                idempotency_key,
+                request_hash
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6::jsonb,
+                $7,
+                $8
+            )
+            ON CONFLICT (
+                run_id,
+                sequence
+            )
+            DO NOTHING
+            "#,
+        )
+        .bind(&input_id)
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .bind(decision_sequence)
+        .bind(&decision_id)
+        .bind(&input_json)
+        .bind(&idempotency_key)
+        .bind(&request_hash)
+        .execute(&mut *tx)
+        .await;
+
+    let inserted =
+        match inserted {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "input_store_unavailable",
+                );
+            }
+        };
+
+    if inserted.rows_affected() != 1 {
+        return api_error(
+            StatusCode::CONFLICT,
+            "input_already_recorded",
+        );
+    }
+
+    let operation_sequence =
+        decision_sequence + 1;
+
+    let operation_id =
+        deterministic_id(
+            "op",
+            &format!(
+                "{run_id}:{operation_sequence}"
+            ),
+        );
+
+    let operation_insert =
+        sqlx::query(
+            r#"
+            INSERT INTO operations (
+                id,
+                run_id,
+                workspace_id,
+                sequence,
+                kind,
+                status,
+                max_attempts
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                'input_continuation',
+                'queued',
+                3
+            )
+            ON CONFLICT (
+                run_id,
+                sequence
+            )
+            DO NOTHING
+            "#,
+        )
+        .bind(&operation_id)
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .bind(operation_sequence)
+        .execute(&mut *tx)
+        .await;
+
+    let operation_insert =
+        match operation_insert {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "operation_store_unavailable",
+                );
+            }
+        };
+
+    if operation_insert.rows_affected() != 1 {
+        return api_error(
+            StatusCode::CONFLICT,
+            "continuation_already_exists",
+        );
+    }
+
+    let updated =
+        sqlx::query(
+            r#"
+            UPDATE runs
+            SET
+                status = 'queued',
+                error_code = NULL,
+                error_retryable = NULL,
+                updated_at = now(),
+                completed_at = NULL
+            WHERE id = $1
+              AND workspace_id = $2
+              AND status = 'needs_input'
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .execute(&mut *tx)
+        .await;
+
+    let updated =
+        match updated {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "input_store_unavailable",
+                );
+            }
+        };
+
+    if updated.rows_affected() != 1 {
+        return api_error(
+            StatusCode::CONFLICT,
+            "run_not_awaiting_input",
+        );
+    }
+
+    if tx.commit().await.is_err() {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "input_store_unavailable",
+        );
+    }
+
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "run_id": &run_id,
+            "operation_id":
+                &operation_id,
+            "status": "queued",
+            "idempotent_replay":
+                false,
+            "input": {
+                "id": input_id,
+                "sequence":
+                    decision_sequence,
+                "decision_id":
+                    decision_id,
+            },
+            "run": {
+                "id": &run_id,
+                "status": "queued",
+            },
+        })),
+    )
+}
+
 async fn create_feedback(
     Path(run_id): Path<String>,
     State(state): State<AppState>,
@@ -2794,7 +3431,78 @@ async fn process_operation(
     let mut latest_observation:
         Option<Value> = None;
 
+    let mut latest_input:
+        Option<Value> = None;
+
     if operation.kind
+        == "input_continuation"
+    {
+        let input_sequence =
+            operation.sequence - 1;
+
+        if input_sequence <= 0 {
+            record_failure(
+                state,
+                operation,
+                "invalid_input_sequence",
+                false,
+            )
+            .await?;
+
+            return Ok(());
+        }
+
+        let input_text =
+            sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT input_json::text
+                FROM run_inputs
+                WHERE run_id = $1
+                  AND workspace_id = $2
+                  AND sequence = $3
+                "#,
+            )
+            .bind(&operation.run_id)
+            .bind(&operation.workspace_id)
+            .bind(input_sequence)
+            .fetch_optional(&state.db)
+            .await?;
+
+        let Some(input_text) =
+            input_text
+        else {
+            record_failure(
+                state,
+                operation,
+                "input_not_found",
+                false,
+            )
+            .await?;
+
+            return Ok(());
+        };
+
+        latest_input =
+            match serde_json::from_str::<Value>(
+                &input_text
+            ) {
+                Ok(value) =>
+                    Some(value),
+
+                Err(_) => {
+                    record_failure(
+                        state,
+                        operation,
+                        "invalid_input_json",
+                        false,
+                    )
+                    .await?;
+
+                    return Ok(());
+                }
+            };
+    }
+    else if operation.kind
         == "observation_continuation"
     {
         let observation_sequence =
@@ -3046,7 +3754,10 @@ async fn process_operation(
         ),
     );
 
-    if latest_observation.is_some()
+    if (
+        latest_observation.is_some()
+        || latest_input.is_some()
+    )
         && runtime_object
             .get("context")
             .and_then(Value::as_object)
@@ -3075,6 +3786,21 @@ async fn process_operation(
             .insert(
                 "latest_observation".to_string(),
                 observation,
+            );
+    }
+
+    if let Some(input) =
+        latest_input
+    {
+        runtime_object
+            .get_mut("context")
+            .and_then(Value::as_object_mut)
+            .expect(
+                "context validated as object"
+            )
+            .insert(
+                "latest_input".to_string(),
+                input,
             );
     }
 
@@ -3439,6 +4165,10 @@ async fn main() {
         .route(
             "/api/v1/runs/{run_id}/observations",
             post(create_observation),
+        )
+        .route(
+            "/api/v1/runs/{run_id}/inputs",
+            post(create_input),
         )
         .route(
             "/api/v1/runs/{run_id}/feedback",
