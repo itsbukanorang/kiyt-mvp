@@ -38,6 +38,21 @@ The member console uses **Next.js + Better Auth**. The public API boundary is **
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Core Open-Source Foundations
+
+KIYT builds its own cognitive service and product logic on top of selected
+open-source foundations:
+
+- **LangGraph** — cognitive graph execution
+- **Mem0** — memory extraction and deduplication
+- **FastEmbed** — local embedding runtime
+- **Qdrant** — vector memory layer
+
+KIYT-specific orchestration, lifecycle, tenancy, memory policy and decision
+logic remain part of the KIYT implementation.
+
+See [`thirdparty/`](thirdparty/) for attribution and license details.
+
 ## Repository
 
 ```text

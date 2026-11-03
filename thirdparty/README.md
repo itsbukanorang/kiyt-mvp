@@ -1,13 +1,15 @@
-# KIYT Open-Source Components
+# KIYT — Third-Party Open-Source Components
 
-This directory contains attribution and license information for
-major open-source components integrated into KIYT.
+KIYT is original application and orchestration code built on top of selected
+open-source foundations.
 
-KIYT uses upstream packages through their standard package managers.
-Upstream source code is not copied into this repository unless KIYT
-intentionally vendors or modifies that source.
+This directory contains attribution for the major open-source components that
+are directly integrated into KIYT's cognitive runtime.
 
-Current integrations are listed in `THIRD_PARTY_LICENSES.md`.
+It is intentionally a curated list of core architectural dependencies rather
+than an exhaustive package-manager dependency inventory.
 
-Additional components are added here when they become part of the
-running KIYT architecture.
+Each component remains the property of its respective authors and is used
+under its upstream license.
+
+See `THIRD_PARTY_LICENSES.md` for versions, roles and license references.
