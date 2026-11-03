@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+
+import { auth } from "@/lib/auth";
 import "./console-home.css";
 
 export const metadata: Metadata = {
@@ -14,11 +18,23 @@ export const metadata: Metadata = {
   },
 };
 
+export const dynamic = "force-dynamic";
+
 export const viewport: Viewport = {
   themeColor: "#05080f",
 };
 
-export default function Home() {
+export default async function Home() {
+  const session =
+    await auth.api.getSession({
+      headers:
+        await headers(),
+    });
+
+  if (session) {
+    redirect("/myaccount");
+  }
+
   return (
     <>
       <a className="skip-link" href="#login">Skip to sign in</a>

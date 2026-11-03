@@ -100,3 +100,30 @@ dialog{width:min(420px,calc(100% - 40px));border:1px solid #4b6a92;border-radius
     margin-top: 13px;
   }
 }
+
+/* KIYT_LOGIN_VISUAL_STABILITY_V1
+   Preserve approved dark login presentation.
+   Do not depend on entrance animation reaching its final frame.
+*/
+html,
+body {
+  background: #05080f !important;
+}
+
+.page-shell {
+  background-color: #05080f !important;
+}
+
+/*
+ * The template previously animates these from opacity: 0.
+ * A browser/render interruption could leave the login washed out.
+ * Keep the final visual state deterministic.
+ */
+.story-copy,
+.story-topline,
+.access-wrap,
+.cognition-note {
+  opacity: 1 !important;
+  transform: none !important;
+  animation: none !important;
+}
