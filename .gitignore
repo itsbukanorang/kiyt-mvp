@@ -29,3 +29,10 @@ backoffice-temp/
 **/backoffice-temp/
 mvp/backoffice-temp/
 **/mvp/backoffice-temp/
+
+# Server-only / judge-facing repo exclusions
+/compose.yaml
+/deploy/
+/apps/console/AGENTS.md
+/apps/console/CLAUDE.md
+/apps/console/README.md

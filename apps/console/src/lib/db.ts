@@ -12,7 +12,7 @@ const globalForKiYT =
  * not injected into the image build.
  *
  * The live container receives DATABASE_URL from
- * /home/kiyt-mvp/private/console.env.
+ * server-side environment configuration.
  */
 export const db =
   globalForKiYT.kiytDatabase ??
