@@ -1,14 +1,21 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use reqwest::Client;
-use sha2::{Digest, Sha256};
-use sqlx::{postgres::PgPoolOptions, PgPool};
 use serde_json::{json, Value};
-use std::{env, net::SocketAddr, time::Duration};
+use sha2::{Digest, Sha256};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::{
+    collections::HashSet,
+    env,
+    net::SocketAddr,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::time::sleep;
+use tracing::{error, warn};
 
 #[derive(Clone)]
 struct AppState {
@@ -18,33 +25,59 @@ struct AppState {
     db: PgPool,
 }
 
+type ApiResponse = (StatusCode, Json<Value>);
+type ApiAuthError = ApiResponse;
+
+#[derive(Debug)]
+struct ClaimedOperation {
+    id: String,
+    run_id: String,
+    workspace_id: String,
+    attempt_count: i32,
+    max_attempts: i32,
+    lease_owner: String,
+}
+
+fn api_error(
+    status: StatusCode,
+    reason: &str,
+) -> ApiResponse {
+    (
+        status,
+        Json(json!({
+            "status": "error",
+            "reason": reason,
+        })),
+    )
+}
+
 async fn healthz() -> Json<Value> {
     Json(json!({
         "status": "ok",
         "service": "kiyt-gateway",
-        "runtime": "rust"
+        "runtime": "rust",
     }))
 }
 
 async fn api_health(
     State(state): State<AppState>,
-) -> (StatusCode, Json<Value>) {
+) -> ApiResponse {
     let url = format!(
         "{}/healthz",
         state.runtime_url.trim_end_matches('/')
     );
 
-    let response = state
+    match state
         .client
         .get(url)
+        .timeout(Duration::from_secs(3))
         .header(
             "x-kiyt-internal-token",
             &state.internal_token,
         )
         .send()
-        .await;
-
-    match response {
+        .await
+    {
         Ok(response) if response.status().is_success() => {
             match response.json::<Value>().await {
                 Ok(runtime) => (
@@ -52,42 +85,22 @@ async fn api_health(
                     Json(json!({
                         "status": "ok",
                         "service": "kiyt-gateway",
-                        "runtime": runtime
+                        "runtime": runtime,
                     })),
                 ),
-                Err(_) => (
+
+                Err(_) => api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
-                    Json(json!({
-                        "status": "error",
-                        "reason": "invalid_runtime_response"
-                    })),
+                    "invalid_runtime_response",
                 ),
             }
         }
-        _ => (
+
+        _ => api_error(
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "status": "error",
-                "reason": "runtime_unavailable"
-            })),
+            "runtime_unavailable",
         ),
     }
-}
-
-
-type ApiAuthError = (StatusCode, Json<Value>);
-
-fn auth_error(
-    status: StatusCode,
-    reason: &'static str,
-) -> ApiAuthError {
-    (
-        status,
-        Json(json!({
-            "status": "error",
-            "reason": reason
-        })),
-    )
 }
 
 fn read_bearer(
@@ -96,14 +109,14 @@ fn read_bearer(
     let value = headers
         .get("authorization")
         .ok_or_else(|| {
-            auth_error(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "missing_bearer_token",
             )
         })?
         .to_str()
         .map_err(|_| {
-            auth_error(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "invalid_bearer_token",
             )
@@ -119,7 +132,7 @@ fn read_bearer(
         || parts.next().is_some()
         || !token.starts_with("kiyt_")
     {
-        return Err(auth_error(
+        return Err(api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_bearer_token",
         ));
@@ -128,11 +141,22 @@ fn read_bearer(
     Ok(token)
 }
 
-fn sha256_hex(value: &str) -> String {
+fn sha256_hex(
+    value: &str,
+) -> String {
     Sha256::digest(value.as_bytes())
         .iter()
-        .map(|b| format!("{b:02x}"))
+        .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn deterministic_id(
+    prefix: &str,
+    material: &str,
+) -> String {
+    let digest = sha256_hex(material);
+
+    format!("{prefix}_{}", &digest[..32])
 }
 
 async fn authenticate_api_key(
@@ -156,14 +180,14 @@ async fn authenticate_api_key(
         .fetch_optional(&state.db)
         .await
         .map_err(|_| {
-            auth_error(
+            api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "api_key_store_unavailable",
             )
         })?;
 
     workspace_id.ok_or_else(|| {
-        auth_error(
+        api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_or_revoked_api_key",
         )
@@ -173,7 +197,7 @@ async fn authenticate_api_key(
 async fn api_auth(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> (StatusCode, Json<Value>) {
+) -> ApiResponse {
     match authenticate_api_key(
         &headers,
         &state,
@@ -184,7 +208,7 @@ async fn api_auth(
             StatusCode::OK,
             Json(json!({
                 "authenticated": true,
-                "workspace_id": workspace_id
+                "workspace_id": workspace_id,
             })),
         ),
 
@@ -192,25 +216,1635 @@ async fn api_auth(
     }
 }
 
+fn read_idempotency_key(
+    headers: &HeaderMap,
+) -> Result<String, ApiResponse> {
+    let value = headers
+        .get("idempotency-key")
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "missing_idempotency_key",
+            )
+        })?
+        .to_str()
+        .map_err(|_| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_idempotency_key",
+            )
+        })?
+        .trim();
+
+    if value.is_empty()
+        || value.len() > 200
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_graphic())
+    {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_idempotency_key",
+        ));
+    }
+
+    Ok(value.to_owned())
+}
+
+fn validate_run_payload(
+    payload: Value,
+) -> Result<Value, ApiResponse> {
+    let object =
+        payload.as_object().ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_run_payload",
+            )
+        })?;
+
+    let objective = object
+        .get("objective")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "objective_required",
+            )
+        })?;
+
+    if objective.len() > 20_000 {
+        return Err(api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "objective_too_large",
+        ));
+    }
+
+    let context = object
+        .get("context")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+
+    if !context.is_object() {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "context_must_be_object",
+        ));
+    }
+
+    let available_actions = object
+        .get("available_actions")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+
+    let actions =
+        available_actions.as_array().ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "available_actions_must_be_array",
+            )
+        })?;
+
+    if actions.len() > 100 {
+        return Err(api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "too_many_available_actions",
+        ));
+    }
+
+    let mut names = HashSet::new();
+
+    for action in actions {
+        let action_object =
+            action.as_object().ok_or_else(|| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_action_definition",
+                )
+            })?;
+
+        let name = action_object
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_action_name",
+                )
+            })?;
+
+        if !names.insert(name.to_owned()) {
+            return Err(api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "duplicate_action_name",
+            ));
+        }
+
+        if let Some(description) =
+            action_object.get("description")
+        {
+            if !description.is_string() {
+                return Err(api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_action_description",
+                ));
+            }
+        }
+
+        if let Some(schema) =
+            action_object.get("input_schema")
+        {
+            if !schema.is_object() {
+                return Err(api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_action_input_schema",
+                ));
+            }
+        }
+    }
+
+    let normalized = json!({
+        "objective": objective,
+        "context": context,
+        "available_actions": available_actions,
+    });
+
+    let encoded =
+        serde_json::to_vec(&normalized)
+            .map_err(|_| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_run_payload",
+                )
+            })?;
+
+    if encoded.len() > 1_000_000 {
+        return Err(api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "run_payload_too_large",
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn pending_status(
+    status: &str,
+) -> bool {
+    matches!(status, "queued" | "running")
+}
+
+async fn load_run_json(
+    db: &PgPool,
+    workspace_id: &str,
+    run_id: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            r.id,
+            r.status,
+            r.error_code,
+            r.error_retryable,
+            r.created_at::text AS created_at,
+            r.updated_at::text AS updated_at,
+            r.completed_at::text AS completed_at,
+
+            d.decision_json::text AS decision_json,
+            d.provider_name,
+            d.model,
+            d.reasoning_effort,
+            d.provider_response_id
+
+        FROM runs r
+
+        LEFT JOIN decisions d
+          ON d.run_id = r.id
+         AND d.sequence = 1
+
+        WHERE r.id = $1
+          AND r.workspace_id = $2
+        "#,
+    )
+    .bind(run_id)
+    .bind(workspace_id)
+    .fetch_optional(db)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let id: String =
+        row.try_get("id")?;
+
+    let status: String =
+        row.try_get("status")?;
+
+    let error_code: Option<String> =
+        row.try_get("error_code")?;
+
+    let error_retryable: Option<bool> =
+        row.try_get("error_retryable")?;
+
+    let created_at: String =
+        row.try_get("created_at")?;
+
+    let updated_at: String =
+        row.try_get("updated_at")?;
+
+    let completed_at: Option<String> =
+        row.try_get("completed_at")?;
+
+    let decision_text: Option<String> =
+        row.try_get("decision_json")?;
+
+    let provider_name: Option<String> =
+        row.try_get("provider_name")?;
+
+    let model: Option<String> =
+        row.try_get("model")?;
+
+    let reasoning_effort: Option<String> =
+        row.try_get("reasoning_effort")?;
+
+    let provider_response_id: Option<String> =
+        row.try_get("provider_response_id")?;
+
+    let decision =
+        decision_text.and_then(|text| {
+            serde_json::from_str::<Value>(
+                &text
+            )
+            .ok()
+        });
+
+    let usage_rows = sqlx::query(
+        r#"
+        SELECT
+            phase,
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            reasoning_tokens,
+            total_tokens
+
+        FROM usage_events
+
+        WHERE run_id = $1
+          AND workspace_id = $2
+
+        ORDER BY phase
+        "#,
+    )
+    .bind(run_id)
+    .bind(workspace_id)
+    .fetch_all(db)
+    .await?;
+
+    let mut usage =
+        serde_json::Map::new();
+
+    for usage_row in usage_rows {
+        let phase: String =
+            usage_row.try_get("phase")?;
+
+        let input_tokens: i64 =
+            usage_row.try_get("input_tokens")?;
+
+        let cached_input_tokens: i64 =
+            usage_row.try_get(
+                "cached_input_tokens"
+            )?;
+
+        let output_tokens: i64 =
+            usage_row.try_get("output_tokens")?;
+
+        let reasoning_tokens: i64 =
+            usage_row.try_get(
+                "reasoning_tokens"
+            )?;
+
+        let total_tokens: i64 =
+            usage_row.try_get("total_tokens")?;
+
+        usage.insert(
+            phase,
+            json!({
+                "input_tokens":
+                    input_tokens,
+                "cached_input_tokens":
+                    cached_input_tokens,
+                "output_tokens":
+                    output_tokens,
+                "reasoning_tokens":
+                    reasoning_tokens,
+                "total_tokens":
+                    total_tokens,
+            }),
+        );
+    }
+
+    let provider =
+        if decision.is_some() {
+            json!({
+                "name": provider_name,
+                "model": model,
+                "reasoning_effort":
+                    reasoning_effort,
+                "response_id":
+                    provider_response_id,
+                "usage":
+                    Value::Object(usage),
+            })
+        } else {
+            Value::Null
+        };
+
+    Ok(Some(json!({
+        "id": id,
+        "status": status,
+        "decision": decision,
+        "provider": provider,
+
+        "error":
+            if error_code.is_some() {
+                json!({
+                    "code": error_code,
+                    "retryable":
+                        error_retryable,
+                })
+            } else {
+                Value::Null
+            },
+
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "completed_at": completed_at,
+    })))
+}
+
+async fn create_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> ApiResponse {
+    let workspace_id =
+        match authenticate_api_key(
+            &headers,
+            &state,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let idempotency_key =
+        match read_idempotency_key(
+            &headers,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let payload =
+        match validate_run_payload(payload) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let request_json =
+        match serde_json::to_string(
+            &payload
+        ) {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_run_payload",
+                );
+            }
+        };
+
+    let request_hash =
+        sha256_hex(&request_json);
+
+    let run_id =
+        deterministic_id(
+            "run",
+            &format!(
+                "{workspace_id}\0{idempotency_key}"
+            ),
+        );
+
+    let operation_id =
+        deterministic_id(
+            "op",
+            &format!("{run_id}:1"),
+        );
+
+    let mut tx =
+        match state.db.begin().await {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "run_store_unavailable",
+                );
+            }
+        };
+
+    let inserted = sqlx::query(
+        r#"
+        INSERT INTO runs (
+            id,
+            workspace_id,
+            idempotency_key,
+            request_hash,
+            request_payload,
+            status
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5::jsonb,
+            'queued'
+        )
+
+        ON CONFLICT (
+            workspace_id,
+            idempotency_key
+        )
+        DO NOTHING
+        "#,
+    )
+    .bind(&run_id)
+    .bind(&workspace_id)
+    .bind(&idempotency_key)
+    .bind(&request_hash)
+    .bind(&request_json)
+    .execute(&mut *tx)
+    .await;
+
+    let inserted =
+        match inserted {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "run_store_unavailable",
+                );
+            }
+        };
+
+    if inserted.rows_affected() == 0 {
+        let existing =
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                ),
+            >(
+                r#"
+                SELECT
+                    id,
+                    status,
+                    request_hash
+                FROM runs
+                WHERE workspace_id = $1
+                  AND idempotency_key = $2
+                "#,
+            )
+            .bind(&workspace_id)
+            .bind(&idempotency_key)
+            .fetch_optional(&mut *tx)
+            .await;
+
+        let existing =
+            match existing {
+                Ok(Some(value)) => value,
+
+                _ => {
+                    return api_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "run_store_unavailable",
+                    );
+                }
+            };
+
+        if existing.2 != request_hash {
+            return api_error(
+                StatusCode::CONFLICT,
+                "idempotency_key_payload_conflict",
+            );
+        }
+
+        if tx.commit().await.is_err() {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "run_store_unavailable",
+            );
+        }
+
+        let run =
+            match load_run_json(
+                &state.db,
+                &workspace_id,
+                &existing.0,
+            )
+            .await
+            {
+                Ok(Some(value)) => value,
+
+                _ => {
+                    return api_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "run_store_unavailable",
+                    );
+                }
+            };
+
+        let response_status =
+            if pending_status(&existing.1) {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            };
+
+        return (
+            response_status,
+            Json(json!({
+                "idempotent_replay":
+                    true,
+                "run":
+                    run,
+            })),
+        );
+    }
+
+    let operation_insert =
+        sqlx::query(
+            r#"
+            INSERT INTO operations (
+                id,
+                run_id,
+                workspace_id,
+                sequence,
+                kind,
+                status,
+                max_attempts
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                1,
+                'cognitive_decision',
+                'queued',
+                3
+            )
+            "#,
+        )
+        .bind(&operation_id)
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .execute(&mut *tx)
+        .await;
+
+    if operation_insert.is_err() {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "operation_store_unavailable",
+        );
+    }
+
+    if tx.commit().await.is_err() {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "run_store_unavailable",
+        );
+    }
+
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "idempotent_replay":
+                false,
+            "run": {
+                "id": run_id,
+                "status": "queued",
+            },
+        })),
+    )
+}
+
+async fn get_run(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResponse {
+    let workspace_id =
+        match authenticate_api_key(
+            &headers,
+            &state,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    match load_run_json(
+        &state.db,
+        &workspace_id,
+        &run_id,
+    )
+    .await
+    {
+        Ok(Some(run)) => (
+            StatusCode::OK,
+            Json(json!({
+                "run": run,
+            })),
+        ),
+
+        Ok(None) => api_error(
+            StatusCode::NOT_FOUND,
+            "run_not_found",
+        ),
+
+        Err(_) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "run_store_unavailable",
+        ),
+    }
+}
+
+async fn fail_exhausted_operations(
+    tx: &mut sqlx::Transaction<
+        '_,
+        sqlx::Postgres,
+    >,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        WITH exhausted AS (
+            UPDATE operations
+            SET
+                status = 'failed',
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                last_error_code =
+                    'operation_attempts_exhausted',
+                last_error_retryable = false,
+                updated_at = now(),
+                completed_at = now()
+
+            WHERE
+                attempt_count >= max_attempts
+
+                AND (
+                    (
+                        status = 'queued'
+                        AND available_at <= now()
+                    )
+
+                    OR
+
+                    (
+                        status = 'running'
+                        AND lease_expires_at
+                            IS NOT NULL
+                        AND lease_expires_at
+                            < now()
+                    )
+                )
+
+            RETURNING
+                run_id,
+                workspace_id
+        )
+
+        UPDATE runs
+        SET
+            status = 'failed',
+            error_code =
+                'operation_attempts_exhausted',
+            error_retryable = false,
+            updated_at = now(),
+            completed_at = now()
+
+        FROM exhausted
+
+        WHERE runs.id =
+            exhausted.run_id
+
+          AND runs.workspace_id =
+            exhausted.workspace_id
+        "#,
+    )
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn claim_next_operation(
+    state: &AppState,
+    worker_id: &str,
+) -> Result<
+    Option<ClaimedOperation>,
+    sqlx::Error,
+> {
+    let mut tx =
+        state.db.begin().await?;
+
+    fail_exhausted_operations(
+        &mut tx
+    )
+    .await?;
+
+    let row = sqlx::query(
+        r#"
+        WITH candidate AS (
+            SELECT id
+            FROM operations
+
+            WHERE
+                attempt_count < max_attempts
+
+                AND (
+                    (
+                        status = 'queued'
+                        AND available_at <= now()
+                    )
+
+                    OR
+
+                    (
+                        status = 'running'
+                        AND lease_expires_at
+                            IS NOT NULL
+                        AND lease_expires_at
+                            < now()
+                    )
+                )
+
+            ORDER BY created_at
+
+            FOR UPDATE SKIP LOCKED
+
+            LIMIT 1
+        )
+
+        UPDATE operations AS operation
+
+        SET
+            status = 'running',
+
+            attempt_count =
+                operation.attempt_count + 1,
+
+            lease_owner = $1,
+
+            lease_expires_at =
+                now()
+                + interval '5 minutes',
+
+            started_at =
+                COALESCE(
+                    operation.started_at,
+                    now()
+                ),
+
+            updated_at = now()
+
+        FROM candidate
+
+        WHERE operation.id =
+            candidate.id
+
+        RETURNING
+            operation.id,
+            operation.run_id,
+            operation.workspace_id,
+            operation.attempt_count,
+            operation.max_attempts
+        "#,
+    )
+    .bind(worker_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(row) = row else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+
+    let operation =
+        ClaimedOperation {
+            id:
+                row.try_get("id")?,
+
+            run_id:
+                row.try_get("run_id")?,
+
+            workspace_id:
+                row.try_get(
+                    "workspace_id"
+                )?,
+
+            attempt_count:
+                row.try_get(
+                    "attempt_count"
+                )?,
+
+            max_attempts:
+                row.try_get(
+                    "max_attempts"
+                )?,
+
+            lease_owner:
+                worker_id.to_owned(),
+        };
+
+    sqlx::query(
+        r#"
+        UPDATE runs
+        SET
+            status = 'running',
+            error_code = NULL,
+            error_retryable = NULL,
+            updated_at = now()
+
+        WHERE id = $1
+          AND workspace_id = $2
+          AND status IN (
+              'queued',
+              'running'
+          )
+        "#,
+    )
+    .bind(&operation.run_id)
+    .bind(&operation.workspace_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Some(operation))
+}
+
+fn usage_value(
+    body: &Value,
+    phase: &str,
+    field: &str,
+) -> i64 {
+    body.pointer(
+        &format!(
+            "/provider/usage/{phase}/{field}"
+        )
+    )
+    .and_then(Value::as_i64)
+    .unwrap_or(0)
+}
+
+async fn complete_operation(
+    state: &AppState,
+    operation: &ClaimedOperation,
+    body: &Value,
+    run_status: &str,
+) -> Result<(), sqlx::Error> {
+    let decision =
+        body.get("decision")
+            .expect(
+                "decision validated"
+            );
+
+    let provider =
+        body.get("provider")
+            .expect(
+                "provider validated"
+            );
+
+    let provider_name =
+        provider
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("meta");
+
+    let model =
+        provider
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+
+    let reasoning_effort =
+        provider
+            .get("reasoning_effort")
+            .and_then(Value::as_str)
+            .unwrap_or("low");
+
+    let provider_response_id =
+        provider
+            .get("response_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+
+    let decision_json =
+        serde_json::to_string(
+            decision
+        )
+        .expect(
+            "decision serialization"
+        );
+
+    let decision_id =
+        deterministic_id(
+            "dec",
+            &format!(
+                "{}:1",
+                operation.run_id
+            ),
+        );
+
+    let mut tx =
+        state.db.begin().await?;
+
+    let operation_update =
+        sqlx::query(
+            r#"
+            UPDATE operations
+            SET
+                status = 'completed',
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                last_error_code = NULL,
+                last_error_retryable = NULL,
+                updated_at = now(),
+                completed_at = now()
+
+            WHERE id = $1
+              AND status = 'running'
+              AND lease_owner = $2
+            "#,
+        )
+        .bind(&operation.id)
+        .bind(&operation.lease_owner)
+        .execute(&mut *tx)
+        .await?;
+
+    if operation_update.rows_affected() != 1 {
+        tx.rollback().await?;
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO decisions (
+            id,
+            run_id,
+            workspace_id,
+            sequence,
+            decision_json,
+            provider_name,
+            model,
+            reasoning_effort,
+            provider_response_id
+        )
+        VALUES (
+            $1,
+            $2,
+            $3,
+            1,
+            $4::jsonb,
+            $5,
+            $6,
+            $7,
+            $8
+        )
+
+        ON CONFLICT (
+            run_id,
+            sequence
+        )
+
+        DO UPDATE SET
+            decision_json =
+                EXCLUDED.decision_json,
+
+            provider_name =
+                EXCLUDED.provider_name,
+
+            model =
+                EXCLUDED.model,
+
+            reasoning_effort =
+                EXCLUDED.reasoning_effort,
+
+            provider_response_id =
+                EXCLUDED.provider_response_id
+        "#,
+    )
+    .bind(&decision_id)
+    .bind(&operation.run_id)
+    .bind(&operation.workspace_id)
+    .bind(&decision_json)
+    .bind(provider_name)
+    .bind(model)
+    .bind(reasoning_effort)
+    .bind(provider_response_id)
+    .execute(&mut *tx)
+    .await?;
+
+    for phase in [
+        "router",
+        "decision",
+    ] {
+        let usage_id =
+            deterministic_id(
+                "use",
+                &format!(
+                    "{decision_id}:{phase}"
+                ),
+            );
+
+        sqlx::query(
+            r#"
+            INSERT INTO usage_events (
+                id,
+                run_id,
+                decision_id,
+                workspace_id,
+                phase,
+                input_tokens,
+                cached_input_tokens,
+                output_tokens,
+                reasoning_tokens,
+                total_tokens
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10
+            )
+
+            ON CONFLICT (
+                decision_id,
+                phase
+            )
+
+            DO UPDATE SET
+                input_tokens =
+                    EXCLUDED.input_tokens,
+
+                cached_input_tokens =
+                    EXCLUDED.cached_input_tokens,
+
+                output_tokens =
+                    EXCLUDED.output_tokens,
+
+                reasoning_tokens =
+                    EXCLUDED.reasoning_tokens,
+
+                total_tokens =
+                    EXCLUDED.total_tokens
+            "#,
+        )
+        .bind(usage_id)
+        .bind(&operation.run_id)
+        .bind(&decision_id)
+        .bind(&operation.workspace_id)
+        .bind(phase)
+        .bind(
+            usage_value(
+                body,
+                phase,
+                "input_tokens",
+            )
+        )
+        .bind(
+            usage_value(
+                body,
+                phase,
+                "cached_input_tokens",
+            )
+        )
+        .bind(
+            usage_value(
+                body,
+                phase,
+                "output_tokens",
+            )
+        )
+        .bind(
+            usage_value(
+                body,
+                phase,
+                "reasoning_tokens",
+            )
+        )
+        .bind(
+            usage_value(
+                body,
+                phase,
+                "total_tokens",
+            )
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE runs
+        SET
+            status = $2,
+            error_code = NULL,
+            error_retryable = NULL,
+            updated_at = now(),
+
+            completed_at =
+                CASE
+                    WHEN $2 = 'completed'
+                    THEN now()
+                    ELSE NULL
+                END
+
+        WHERE id = $1
+          AND workspace_id = $3
+        "#,
+    )
+    .bind(&operation.run_id)
+    .bind(run_status)
+    .bind(&operation.workspace_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+async fn record_failure(
+    state: &AppState,
+    operation: &ClaimedOperation,
+    code: &str,
+    retryable: bool,
+) -> Result<(), sqlx::Error> {
+    let should_retry =
+        retryable
+            && operation.attempt_count
+                < operation.max_attempts;
+
+    let mut tx =
+        state.db.begin().await?;
+
+    if should_retry {
+        let delay_seconds =
+            operation
+                .attempt_count
+                .clamp(1, 5);
+
+        let updated = sqlx::query(
+            r#"
+            UPDATE operations
+            SET
+                status = 'queued',
+
+                available_at =
+                    now()
+                    + (
+                        $3::int
+                        * interval '1 second'
+                    ),
+
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+
+                last_error_code = $4,
+                last_error_retryable = true,
+
+                updated_at = now()
+
+            WHERE id = $1
+              AND lease_owner = $2
+            "#,
+        )
+        .bind(&operation.id)
+        .bind(&operation.lease_owner)
+        .bind(delay_seconds)
+        .bind(code)
+        .execute(&mut *tx)
+        .await?;
+
+        if updated.rows_affected() == 1 {
+            sqlx::query(
+                r#"
+                UPDATE runs
+                SET
+                    status = 'queued',
+                    error_code = $2,
+                    error_retryable = true,
+                    updated_at = now(),
+                    completed_at = NULL
+
+                WHERE id = $1
+                  AND workspace_id = $3
+                "#,
+            )
+            .bind(&operation.run_id)
+            .bind(code)
+            .bind(&operation.workspace_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    } else {
+        let updated = sqlx::query(
+            r#"
+            UPDATE operations
+            SET
+                status = 'failed',
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                last_error_code = $3,
+                last_error_retryable = $4,
+                updated_at = now(),
+                completed_at = now()
+
+            WHERE id = $1
+              AND lease_owner = $2
+            "#,
+        )
+        .bind(&operation.id)
+        .bind(&operation.lease_owner)
+        .bind(code)
+        .bind(retryable)
+        .execute(&mut *tx)
+        .await?;
+
+        if updated.rows_affected() == 1 {
+            sqlx::query(
+                r#"
+                UPDATE runs
+                SET
+                    status = 'failed',
+                    error_code = $2,
+                    error_retryable = $3,
+                    updated_at = now(),
+                    completed_at = now()
+
+                WHERE id = $1
+                  AND workspace_id = $4
+                "#,
+            )
+            .bind(&operation.run_id)
+            .bind(code)
+            .bind(retryable)
+            .bind(&operation.workspace_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+async fn process_operation(
+    state: &AppState,
+    operation: &ClaimedOperation,
+) -> Result<(), sqlx::Error> {
+    let payload_text =
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT request_payload::text
+            FROM runs
+            WHERE id = $1
+              AND workspace_id = $2
+            "#,
+        )
+        .bind(&operation.run_id)
+        .bind(&operation.workspace_id)
+        .fetch_one(&state.db)
+        .await?;
+
+    let payload =
+        match serde_json::from_str::<Value>(
+            &payload_text
+        ) {
+            Ok(value) => value,
+
+            Err(_) => {
+                record_failure(
+                    state,
+                    operation,
+                    "invalid_durable_request_payload",
+                    false,
+                )
+                .await?;
+
+                return Ok(());
+            }
+        };
+
+    let url = format!(
+        "{}/cognition/decide",
+        state.runtime_url.trim_end_matches('/')
+    );
+
+    let response = state
+        .client
+        .post(url)
+        .header(
+            "x-kiyt-internal-token",
+            &state.internal_token,
+        )
+        .json(&payload)
+        .send()
+        .await;
+
+    let response =
+        match response {
+            Ok(value) => value,
+
+            Err(_) => {
+                record_failure(
+                    state,
+                    operation,
+                    "runtime_transport_failure",
+                    true,
+                )
+                .await?;
+
+                return Ok(());
+            }
+        };
+
+    let status = response.status();
+
+    let body_text =
+        match response.text().await {
+            Ok(value) => value,
+
+            Err(_) => {
+                record_failure(
+                    state,
+                    operation,
+                    "runtime_response_read_failure",
+                    true,
+                )
+                .await?;
+
+                return Ok(());
+            }
+        };
+
+    if !status.is_success() {
+        let parsed =
+            serde_json::from_str::<Value>(
+                &body_text
+            )
+            .ok();
+
+        let code = parsed
+            .as_ref()
+            .and_then(|value| {
+                value.pointer(
+                    "/detail/code"
+                )
+            })
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "runtime_http_{}",
+                    status.as_u16()
+                )
+            });
+
+        let retryable = parsed
+            .as_ref()
+            .and_then(|value| {
+                value.pointer(
+                    "/detail/retryable"
+                )
+            })
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| {
+                status.is_server_error()
+                    || status
+                        == StatusCode::
+                            TOO_MANY_REQUESTS
+            });
+
+        record_failure(
+            state,
+            operation,
+            &code,
+            retryable,
+        )
+        .await?;
+
+        return Ok(());
+    }
+
+    let body =
+        match serde_json::from_str::<Value>(
+            &body_text
+        ) {
+            Ok(value) => value,
+
+            Err(_) => {
+                record_failure(
+                    state,
+                    operation,
+                    "invalid_runtime_json",
+                    true,
+                )
+                .await?;
+
+                return Ok(());
+            }
+        };
+
+    let decision_status =
+        body.pointer(
+            "/decision/status"
+        )
+        .and_then(Value::as_str);
+
+    let provider_valid =
+        body.get("provider")
+            .and_then(Value::as_object)
+            .is_some();
+
+    let usage_valid =
+        body.pointer(
+            "/provider/usage/router"
+        )
+        .and_then(Value::as_object)
+        .is_some()
+        &&
+        body.pointer(
+            "/provider/usage/decision"
+        )
+        .and_then(Value::as_object)
+        .is_some();
+
+    let run_status =
+        match decision_status {
+            Some("requires_action") =>
+                "awaiting_observation",
+
+            Some("needs_input") =>
+                "needs_input",
+
+            Some("completed") =>
+                "completed",
+
+            _ => {
+                record_failure(
+                    state,
+                    operation,
+                    "invalid_runtime_decision",
+                    false,
+                )
+                .await?;
+
+                return Ok(());
+            }
+        };
+
+    if !provider_valid || !usage_valid {
+        record_failure(
+            state,
+            operation,
+            "invalid_runtime_provider_metadata",
+            false,
+        )
+        .await?;
+
+        return Ok(());
+    }
+
+    complete_operation(
+        state,
+        operation,
+        &body,
+        run_status,
+    )
+    .await
+}
+
+async fn worker_loop(
+    state: AppState,
+    worker_id: String,
+) {
+    loop {
+        match claim_next_operation(
+            &state,
+            &worker_id,
+        )
+        .await
+        {
+            Ok(Some(operation)) => {
+                if let Err(error) =
+                    process_operation(
+                        &state,
+                        &operation,
+                    )
+                    .await
+                {
+                    error!(
+                        worker = %worker_id,
+                        operation = %operation.id,
+                        error = %error,
+                        "operation processing database failure"
+                    );
+                }
+            }
+
+            Ok(None) => {
+                sleep(
+                    Duration::from_millis(250)
+                )
+                .await;
+            }
+
+            Err(error) => {
+                warn!(
+                    worker = %worker_id,
+                    error = %error,
+                    "operation claim failed"
+                );
+
+                sleep(
+                    Duration::from_secs(1)
+                )
+                .await;
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env(),
+            tracing_subscriber::
+                EnvFilter::
+                from_default_env(),
         )
         .init();
 
     let runtime_url =
         env::var("KIYT_RUNTIME_URL")
-            .expect("KIYT_RUNTIME_URL is required");
+            .expect(
+                "KIYT_RUNTIME_URL is required"
+            );
 
     let internal_token =
         env::var("KIYT_INTERNAL_TOKEN")
-            .expect("KIYT_INTERNAL_TOKEN is required");
+            .expect(
+                "KIYT_INTERNAL_TOKEN is required"
+            );
 
     let database_url =
         env::var("KIYT_DATABASE_URL")
-            .expect("KIYT_DATABASE_URL is required");
+            .expect(
+                "KIYT_DATABASE_URL is required"
+            );
+
+    let worker_count =
+        env::var("KIYT_RUN_WORKERS")
+            .ok()
+            .and_then(|value| {
+                value
+                    .parse::<usize>()
+                    .ok()
+            })
+            .unwrap_or(4)
+            .clamp(1, 16);
 
     let db =
         PgPoolOptions::new()
@@ -220,12 +1854,19 @@ async fn main() {
             )
             .connect(&database_url)
             .await
-            .expect("PostgreSQL connection failed");
+            .expect(
+                "PostgreSQL connection failed"
+            );
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .expect("HTTP client initialization failed");
+    let client =
+        Client::builder()
+            .timeout(
+                Duration::from_secs(250),
+            )
+            .build()
+            .expect(
+                "HTTP client initialization failed"
+            );
 
     let state = AppState {
         client,
@@ -234,19 +1875,73 @@ async fn main() {
         db,
     };
 
+    let startup_id =
+        SystemTime::now()
+            .duration_since(
+                UNIX_EPOCH,
+            )
+            .expect("system clock")
+            .as_nanos();
+
+    for index in 0..worker_count {
+        let worker_state =
+            state.clone();
+
+        let worker_id =
+            format!(
+                "gateway-{startup_id}-{index}"
+            );
+
+        tokio::spawn(
+            worker_loop(
+                worker_state,
+                worker_id,
+            )
+        );
+    }
+
     let app = Router::new()
-        .route("/healthz", get(healthz))
-        .route("/api/v1/health", get(api_health))
-        .route("/api/v1/auth", get(api_auth))
+        .route(
+            "/healthz",
+            get(healthz),
+        )
+        .route(
+            "/api/v1/health",
+            get(api_health),
+        )
+        .route(
+            "/api/v1/auth",
+            get(api_auth),
+        )
+        .route(
+            "/api/v1/runs",
+            post(create_run),
+        )
+        .route(
+            "/api/v1/runs/{run_id}",
+            get(get_run),
+        )
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr =
+        SocketAddr::from(
+            ([0, 0, 0, 0], 8080)
+        );
 
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("gateway bind failed");
+    let listener =
+        tokio::net::
+            TcpListener::bind(addr)
+            .await
+            .expect(
+                "gateway bind failed"
+            );
 
-    axum::serve(listener, app)
-        .await
-        .expect("gateway server failed");
+    axum::serve(
+        listener,
+        app,
+    )
+    .await
+    .expect(
+        "gateway server failed"
+    );
 }

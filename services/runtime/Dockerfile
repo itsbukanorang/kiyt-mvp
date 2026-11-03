@@ -12,7 +12,7 @@ RUN python -m pip install \
     --disable-pip-version-check \
     -r requirements.txt
 
-COPY --chown=65534:65534 --chmod=0444 app.py /app/app.py
+COPY --chown=65534:65534 --chmod=0444 app.py cognitive_graph.py meta_reasoner.py /app/
 
 USER 65534:65534
 
