@@ -66,14 +66,17 @@ Production deployment configuration, host paths, credentials, private environmen
 | 09 Runs + usage + billing | NOT_STARTED |
 | 10 API documentation | NOT_STARTED |
 | 11 Release verification | NOT_STARTED |
+| 12 Global KIYT learning | NOT_STARTED |
 
-**Current position: 7 / 12 modules PASS (58.3%).**
+**Current position: Modules 00–06 PASS — 7 completed milestones. Module 11 is the MVP service release gate; Module 12 is an extended global-learning milestone.**
 
 Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
 
 Module 06 is production complete with 60/60 hard tests passing across Working, Episodic and Semantic Memory. Semantic trust is ordered as `candidate < customer_provided < verified`, and recalled memory is treated as untrusted evidence rather than instructions.
 
-Current execution priority: `08 → 07 → 09 → 10 → 11`.
+Module 12 extends KIYT with global learning from eligible, permissioned and abstracted usage. Candidate improvements are evaluated against held-out tests and require an explicit release decision before activation. Raw private customer memory, secrets, identifiers and proprietary content are excluded from shared learning data.
+
+Current execution priority: `08 → 07 → 09 → 10 → 11 → 12`.
 
 ## Public Cognitive API Direction
 
