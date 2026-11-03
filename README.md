@@ -59,15 +59,15 @@ Production deployment configuration, host paths, credentials, private environmen
 | 02 PostgreSQL + Qdrant | PASS |
 | 03 Better Auth | PASS |
 | 04 Workspace + members + API keys | PASS |
-| 05 First cognitive decision | NEXT |
-| 06 Three memories | NOT_STARTED |
+| 05 First cognitive decision | PASS |
+| 06 Three memories | NEXT |
 | 07 Evaluation + online RL | NOT_STARTED |
 | 08 Playground integration | NOT_STARTED |
 | 09 Runs + usage + billing | NOT_STARTED |
 | 10 API documentation | NOT_STARTED |
 | 11 Release verification | NOT_STARTED |
 
-**Current position: 5 / 12 modules PASS.**
+**Current position: 6 / 12 modules PASS.**
 
 Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
 
