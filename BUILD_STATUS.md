@@ -1,6 +1,6 @@
 # KIYT MVP — Build Status
 
-Updated: 3 November 2026 (UTC+7)
+Updated: 4 November 2026 (UTC+7)
 
 ## Current Position
 
@@ -12,14 +12,14 @@ Updated: 3 November 2026 (UTC+7)
 | 03 Better Auth | PASS | Signup, login, logout, session and protected console |
 | 04 Workspace + members + API key | PASS | Multi-workspace, invites/roles, API-key console and Rust Bearer auth |
 | 05 First cognitive decision | PASS | Production 10/10 public decision acceptance with real Muse Spark 1.3; durable PostgreSQL run/operation/decision/usage ledger; auth, isolation, idempotency and recovery verified |
-| 06 Three memories | NEXT | Working / episodic / semantic memory path not implemented yet |
+| 06 Three memories | PASS | Working, episodic and semantic memory production acceptance 60/60 PASS |
 | 07 Evaluation + online RL | NOT_STARTED | Evaluation, reward and policy learner not implemented yet |
-| 08 Playground integration | NOT_STARTED | UI exists; real cognitive API integration pending |
+| 08 Playground integration | NEXT | Connect existing Playground UI to the real cognitive API |
 | 09 Runs + usage + billing | NOT_STARTED | Real run / usage data path pending |
 | 10 API documentation | NOT_STARTED | External quickstart pending |
 | 11 Release verification | NOT_STARTED | Depends on Modules 05–10 |
 
-**6 of 12 modules PASS (50%).**
+**7 of 12 modules PASS (58.3%).**
 
 ## Module 04 Evidence
 
@@ -62,10 +62,10 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 ## Current build position
 
-- Modules 00–05: PASS.
-- Module 06 — Three memories: NEXT.
-- Overall module count: 6/12 PASS (50%).
-- Production source: `main@722bb51` with Module 05 implementation at `192a3f2`.
+- Modules 00–06: PASS.
+- Module 06 — Three memories: PASS (60/60 production hard tests).
+- Overall module count: 7/12 PASS (58.3%).
+- Production source: `main@6398baee494098671b738ae3e24fbada461a2348`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
 - Production runtime/gateway health: PASS.
@@ -97,4 +97,26 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Production-local `compose.yaml` remains intentionally ignored by Git.
 - Runtime secrets remain outside Git; `/etc/kiyt/runtime.env` is not committed.
 
-Next milestone: Module 06 — Mem0 + three memories.
+Next milestone: Module 08 — Playground integration.
+
+
+## Module 06 production completion
+
+Module 06 completed production acceptance on 4 November 2026 (UTC+7).
+
+- Release commit: `6398baee494098671b738ae3e24fbada461a2348`.
+- Working Memory: 20/20 PASS.
+- Episodic Memory: 20/20 PASS.
+- Semantic Memory: 20/20 PASS.
+- Total Module 06 hard tests: 60/60 PASS.
+- PostgreSQL and Qdrant remain private.
+- Workspace isolation: PASS.
+- Restart persistence: PASS.
+- Observation contract and idempotency: PASS.
+- Mem0 `infer=True` semantic extraction: PASS.
+- Real Meta Muse Spark 1.3 memory influence: PASS.
+- Memory injection defense: PASS.
+- Production health and logs: PASS.
+- Test fixtures cleaned: PASS.
+
+Execution order after Module 06: `08 → 07 → 09 → 10 → 11`.

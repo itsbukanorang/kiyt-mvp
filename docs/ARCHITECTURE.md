@@ -82,4 +82,22 @@ POST /api/v1/runs/{id}/observations
   -> evaluation / next decision
 ```
 
-The current implementation has completed the foundation through workspace-scoped Rust Bearer authentication. The next milestone is the first real cognitive decision path.
+## Three-Memory Runtime
+
+Module 06 is production complete.
+
+- Working memory stores compact workspace/run state: objective, plan and latest observation.
+- Episodic memory stores decisions together with customer-observed success/failure outcomes.
+- Semantic memory stores durable knowledge with trust levels `candidate < customer_provided < verified`.
+- Model-derived semantic knowledge remains candidate until explicitly verified.
+- Mem0 OSS assists semantic extraction/update/deduplication using shared private Qdrant.
+- Semantic embeddings use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384 dimensions, Cosine distance.
+- Recalled memory is untrusted evidence and cannot override authorization, current objectives or customer-provided available actions.
+- PostgreSQL remains the durable operational ledger; Qdrant stores cognitive memory.
+- Public observation flow validates decision ownership, observation identity and idempotency.
+
+Production Module 06 acceptance: Working 20/20, Episodic 20/20, Semantic 20/20 — total 60/60 PASS.
+
+Current production baseline: `main@6398baee494098671b738ae3e24fbada461a2348`.
+
+Next execution milestone: Module 08 — Playground integration. Execution order afterward remains `07 → 09 → 10 → 11`.

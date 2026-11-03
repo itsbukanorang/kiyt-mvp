@@ -60,16 +60,20 @@ Production deployment configuration, host paths, credentials, private environmen
 | 03 Better Auth | PASS |
 | 04 Workspace + members + API keys | PASS |
 | 05 First cognitive decision | PASS |
-| 06 Three memories | NEXT |
+| 06 Three memories | PASS |
 | 07 Evaluation + online RL | NOT_STARTED |
-| 08 Playground integration | NOT_STARTED |
+| 08 Playground integration | NEXT |
 | 09 Runs + usage + billing | NOT_STARTED |
 | 10 API documentation | NOT_STARTED |
 | 11 Release verification | NOT_STARTED |
 
-**Current position: 6 / 12 modules PASS.**
+**Current position: 7 / 12 modules PASS (58.3%).**
 
 Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
+
+Module 06 is production complete with 60/60 hard tests passing across Working, Episodic and Semantic Memory. Semantic trust is ordered as `candidate < customer_provided < verified`, and recalled memory is treated as untrusted evidence rather than instructions.
+
+Current execution priority: `08 → 07 → 09 → 10 → 11`.
 
 ## Public Cognitive API Direction
 
