@@ -11,7 +11,7 @@ Updated: 3 November 2026 (UTC+7)
 | 02 PostgreSQL + Qdrant | PASS | Private persistent datastores |
 | 03 Better Auth | PASS | Signup, login, logout, session and protected console |
 | 04 Workspace + members + API key | PASS | Multi-workspace, invites/roles, API-key console and Rust Bearer auth |
-| 05 First cognitive decision | PASS | Production acceptance PASS: real Muse Spark 1.3, 10/10 public decision cases, durable PostgreSQL ledger, auth negative, workspace isolation, idempotency, recovery gates and final public health verified |
+| 05 First cognitive decision | PASS | Production 10/10 public decision acceptance with real Muse Spark 1.3; durable PostgreSQL run/operation/decision/usage ledger; auth, isolation, idempotency and recovery verified |
 | 06 Three memories | NEXT | Working / episodic / semantic memory path not implemented yet |
 | 07 Evaluation + online RL | NOT_STARTED | Evaluation, reward and policy learner not implemented yet |
 | 08 Playground integration | NOT_STARTED | UI exists; real cognitive API integration pending |
@@ -57,7 +57,19 @@ POST /api/v1/runs
   -> GET /api/v1/runs/{id}
 ```
 
-Module 05 is not PASS until the request reaches the real provider, the decision is durably stored, progress can be polled, and idempotency / recovery gates pass.
+Module 05 is PASS. Production acceptance verified the real provider path, durable decision persistence, public polling, idempotency, workspace isolation, bounded execution, recovery, usage persistence, fixture cleanup, and final public health.
+
+
+## Current build position
+
+- Modules 00–05: PASS.
+- Module 06 — Three memories: NEXT.
+- Overall module count: 6/12 PASS (50%).
+- Production source: `main@722bb51` with Module 05 implementation at `192a3f2`.
+- Public Module 05 acceptance: 10/10 PASS.
+- Production migration 005: applied.
+- Production runtime/gateway health: PASS.
+- Secrets and production-local `compose.yaml`: outside Git.
 
 ## Status Rule
 
