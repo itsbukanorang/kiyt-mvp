@@ -13,3 +13,32 @@ Architecture:
 
 `console.kiyt.io/mvp/backoffice-temp` is intentionally maintained outside
 this Git repository.
+
+<!-- KIYT_STATUS_START -->
+
+## Current Build Status
+
+| Module | Status |
+|---|---|
+| 00 VPS Audit | PASS |
+| 01 Console + Rust/Python Runtime | PASS |
+| 02 PostgreSQL + Qdrant | PASS |
+| 03 Better Auth | PASS |
+| 04 Workspace + Members + API Key | IN_PROGRESS |
+| 05 First Cognitive Decision | NOT_STARTED |
+| 06 Three Memories | NOT_STARTED |
+| 07 Observation Loop | NOT_STARTED |
+| 08 Playground Integration | NOT_STARTED |
+| 09 Runs + Usage + Billing | NOT_STARTED |
+| 10 API Documentation | NOT_STARTED |
+| 11 Release Verification | NOT_STARTED |
+
+Module 04:
+- Multi-workspace: PASS
+- Members / invites / roles: PASS
+- API Key Console: PASS
+- Rust Bearer API Auth: PENDING
+
+Next: `04B-2 - Rust Bearer API Authentication`
+
+<!-- KIYT_STATUS_END -->

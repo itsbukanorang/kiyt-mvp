@@ -13,8 +13,12 @@ FOUNDATION
 [02] PostgreSQL + Qdrant              PASS
 
 MEMBER / TENANT
-[03] Better Auth                      NEXT
-[04] Workspace + API Key             NOT_STARTED
+[03] Better Auth                      PASS
+[04] Workspace + Members + API Key   IN_PROGRESS
+     04A Multi-workspace             PASS
+     04B-1 Members / Invites         PASS
+     API Key Console                 PASS
+     04B-2 Rust Bearer Auth          PENDING
 
 COGNITIVE CORE
 [05] First Cognitive Decision         NOT_STARTED
@@ -172,3 +176,76 @@ Acceptance:
 - Existing runtime/datastore isolation remains intact
 
 After Module 3 passes: `Module 4 - Workspace + API Key`
+
+
+---
+
+## Current Module 04 Checkpoint
+
+### Better Auth
+
+Status: `PASS`
+
+Hard-tested:
+- signup/login/logout
+- persistent session
+- `/myaccount` protection
+- authenticated console root redirects to `/myaccount`
+- incognito remains on login
+
+### 04A - Multi-workspace
+
+Status: `PASS`
+
+Hard-tested:
+- create workspace
+- switch active workspace
+- rename workspace
+- workspace selector
+- membership validation
+- workspace-scoped data
+
+### 04B-1 - Members / Invites / Roles
+
+Status: `PASS`
+
+Hard-tested:
+- invite member/admin
+- accept invite
+- email matching
+- revoke invite
+- remove member
+- owner/admin/member authorization
+- membership isolation
+
+### API Key Console
+
+Status: `PASS`
+
+Hard-tested:
+- create multiple keys
+- raw key shown once
+- revoke key
+- workspace isolation
+- Active / Revoked / All filters
+- Active default filter
+- one-time copy safety flow
+- raw key hidden after close/timeout
+
+### 04B-2 - Rust Bearer Authentication
+
+Status: `PENDING`
+
+Required before Module 04 becomes PASS:
+- `Authorization: Bearer kiyt_<secret>`
+- SHA-256 key lookup
+- reject invalid/revoked key
+- derive workspace from key
+- update `last_used_at`
+- enforce tenant isolation in Rust
+
+## Next
+
+`04B-2 - Rust Bearer API Authentication`
+
+Module 05 must not start until Module 04 is fully `PASS`.
