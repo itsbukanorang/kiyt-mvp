@@ -14,13 +14,13 @@ Updated: 4 November 2026 (UTC+7)
 | 05 First cognitive decision | PASS | Production 10/10 public decision acceptance with real Muse Spark 1.3; durable PostgreSQL run/operation/decision/usage ledger; auth, isolation, idempotency and recovery verified |
 | 06 Three memories | PASS | Working, episodic and semantic memory production acceptance 60/60 PASS |
 | 07 Evaluation + online RL | NOT_STARTED | Evaluation, reward and policy learner not implemented yet |
-| 08 Playground integration | NEXT | Connect existing Playground UI to the real cognitive API |
+| 08 Playground integration | PASS | Real Playground run creation, polling, structured decisions, observation continuation, durable `needs_input` continuation, reload resume and production browser E2E verified |
 | 09 Runs + usage + billing | NOT_STARTED | Real run / usage data path pending |
 | 10 API documentation | NOT_STARTED | External quickstart pending |
 | 11 Release verification | NOT_STARTED | Final production release gate after Modules 05–10 |
 | 12 Global KIYT learning | NOT_STARTED | Permissioned, abstracted global learning pipeline with holdout evaluation and manual activation |
 
-**Modules 00–06 PASS (7 completed milestones). Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
+**Modules 00–06 and 08 PASS (8 completed milestones). Module 07 is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
 
 ## Module 04 Evidence
 
@@ -63,12 +63,14 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 ## Current build position
 
-- Modules 00–06: PASS.
+- Modules 00–06 and 08: PASS.
 - Module 06 — Three memories: PASS (60/60 production hard tests).
-- Completed milestones: Modules 00–06 PASS.
+- Completed milestones: Modules 00–06 plus Module 08 PASS (8 milestones).
 - Pre-Module 08 API contract hardening: PASS at `main@75d75de6aff6e8a9aa67d5d8fbe780933d591339`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
+- Production migration 008 (`run_inputs`): applied.
+- Module 08 real Playground browser E2E: PASS.
 - Production runtime/gateway health: PASS.
 - Production secrets and deployment-only configuration remain outside the public repository.
 
@@ -98,7 +100,7 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Deployment-only configuration remains outside the public repository.
 - Runtime secrets remain outside Git.
 
-Next milestone: Module 08 — Playground integration.
+Next milestone: Module 07 — Evaluation + online RL.
 
 
 ## Module 06 production completion
@@ -120,7 +122,31 @@ Module 06 completed production acceptance on 4 November 2026 (UTC+7).
 - Production health and logs: PASS.
 - Test fixtures cleaned: PASS.
 
-Execution order after Module 06: `08 → 07 → 09 → 10 → 11 → 12`.
+Execution order after Module 08: `07 → 09 → 10 → 11 → 12`.
+
+## Module 08 production completion
+
+Module 08 completed production acceptance on 4 November 2026 (UTC+7).
+
+- Release commit: `2c3a3872db505d0b5a89c0de488b3b50dc9ef9e1`.
+- Playground uses the real cognitive API; no fake decision path.
+- Real run creation and durable polling: PASS.
+- Structured action decision rendering: PASS.
+- `requires_action` observation continuation: PASS.
+- Exact `decision_id` continuation contract: PASS.
+- Durable `run_inputs` persistence: PASS.
+- `needs_input` continuation through `POST /api/v1/runs/{id}/inputs`: PASS.
+- Input continuation resumes reasoning on the same persisted run: PASS.
+- Reload resumes the workspace's persisted run: PASS.
+- Console cognitive bridge remains workspace-scoped and authenticated: PASS.
+- Production migration `008_run_inputs.sql`: PASS.
+- Rust gateway health after deployment: PASS.
+- Console production deployment: PASS.
+- Public unauthenticated cognitive access remains HTTP 401.
+- Browser E2E `INPUT NEEDED → Continue run → reasoning → next decision`: PASS.
+- Production secrets and deployment-only configuration remain outside Git.
+
+Current next milestone: Module 07 — Evaluation + online RL.
 
 ## Module 12 — Global KIYT Learning
 
