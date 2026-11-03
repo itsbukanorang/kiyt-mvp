@@ -3,3 +3,7 @@ uvicorn[standard]==0.54.0
 langgraph==1.2.19
 httpx==0.28.1
 jsonschema==4.26.0
+qdrant-client==1.20.0
+fastembed==0.9.1
+mem0ai[nlp]==2.2.1
+spacy==3.8.18

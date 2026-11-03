@@ -33,6 +33,8 @@ struct ClaimedOperation {
     id: String,
     run_id: String,
     workspace_id: String,
+    sequence: i32,
+    kind: String,
     attempt_count: i32,
     max_attempts: i32,
     lease_owner: String,
@@ -391,6 +393,121 @@ fn validate_run_payload(
     Ok(normalized)
 }
 
+fn validate_observation_payload(
+    payload: Value,
+) -> Result<Value, ApiResponse> {
+    let object =
+        payload.as_object().ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_observation_payload",
+            )
+        })?;
+
+    let decision_id = object
+        .get("decision_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "observation_decision_id_required",
+            )
+        })?;
+
+    if decision_id.len() > 128 {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_observation_decision_id",
+        ));
+    }
+
+    let client_observation_id = object
+        .get("observation_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "observation_id_required",
+            )
+        })?;
+
+    if client_observation_id.len() > 128 {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_observation_id",
+        ));
+    }
+
+    let result = object
+        .get("result")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "observation_result_required",
+            )
+        })?;
+
+    let status = result
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "observation_status_required",
+            )
+        })?;
+
+    if !matches!(
+        status,
+        "success" | "failure"
+    ) {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_observation_status",
+        ));
+    }
+
+    let output = result
+        .get("output")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+
+    let normalized = json!({
+        "decision_id": decision_id,
+        "observation_id":
+            client_observation_id,
+        "result": {
+            "status": status,
+            "output": output,
+        },
+    });
+
+    let encoded =
+        serde_json::to_vec(&normalized)
+            .map_err(|_| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_observation_payload",
+                )
+            })?;
+
+    if encoded.len() > 1_000_000 {
+        return Err(api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "observation_payload_too_large",
+        ));
+    }
+
+    Ok(normalized)
+}
+
+
 fn pending_status(
     status: &str,
 ) -> bool {
@@ -421,9 +538,20 @@ async fn load_run_json(
 
         FROM runs r
 
-        LEFT JOIN decisions d
-          ON d.run_id = r.id
-         AND d.sequence = 1
+        LEFT JOIN LATERAL (
+            SELECT
+                d0.id,
+                d0.decision_json,
+                d0.provider_name,
+                d0.model,
+                d0.reasoning_effort,
+                d0.provider_response_id
+            FROM decisions d0
+            WHERE d0.run_id = r.id
+              AND d0.workspace_id = r.workspace_id
+            ORDER BY d0.sequence DESC
+            LIMIT 1
+        ) d ON true
 
         WHERE r.id = $1
           AND r.workspace_id = $2
@@ -496,6 +624,14 @@ async fn load_run_json(
 
         WHERE run_id = $1
           AND workspace_id = $2
+          AND decision_id = (
+              SELECT id
+              FROM decisions
+              WHERE run_id = $1
+                AND workspace_id = $2
+              ORDER BY sequence DESC
+              LIMIT 1
+          )
 
         ORDER BY phase
         "#,
@@ -891,6 +1027,563 @@ async fn get_run(
     }
 }
 
+async fn create_observation(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> ApiResponse {
+    let workspace_id =
+        match authenticate_api_key(
+            &headers,
+            &state,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let idempotency_key =
+        match read_idempotency_key(
+            &headers,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let payload =
+        match validate_observation_payload(
+            payload
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let request_json =
+        match serde_json::to_string(
+            &payload
+        ) {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_observation_payload",
+                );
+            }
+        };
+
+    let request_hash =
+        sha256_hex(&request_json);
+
+    let requested_decision_id =
+        payload
+            .get("decision_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+    let requested_observation_id =
+        payload
+            .get("observation_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+    let result_json =
+        match serde_json::to_string(
+            &payload["result"]
+        ) {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_observation_payload",
+                );
+            }
+        };
+
+    let observation_id =
+        deterministic_id(
+            "obs",
+            &format!(
+                "{workspace_id}\0{run_id}\0{requested_observation_id}"
+            ),
+        );
+
+    let mut tx =
+        match state.db.begin().await {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "observation_store_unavailable",
+                );
+            }
+        };
+
+    let existing =
+        sqlx::query_as::<
+            _,
+            (String, String),
+        >(
+            r#"
+            SELECT
+                id,
+                request_hash
+            FROM observations
+            WHERE run_id = $1
+              AND workspace_id = $2
+              AND idempotency_key = $3
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .bind(&idempotency_key)
+        .fetch_optional(&mut *tx)
+        .await;
+
+    let existing =
+        match existing {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "observation_store_unavailable",
+                );
+            }
+        };
+
+    if let Some((
+        existing_id,
+        existing_hash,
+    )) = existing
+    {
+        if existing_hash != request_hash {
+            return api_error(
+                StatusCode::CONFLICT,
+                "idempotency_key_payload_conflict",
+            );
+        }
+
+        if tx.commit().await.is_err() {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "observation_store_unavailable",
+            );
+        }
+
+        let run =
+            match load_run_json(
+                &state.db,
+                &workspace_id,
+                &run_id,
+            )
+            .await
+            {
+                Ok(Some(value)) => value,
+
+                Ok(None) => {
+                    return api_error(
+                        StatusCode::NOT_FOUND,
+                        "run_not_found",
+                    );
+                }
+
+                Err(_) => {
+                    return api_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "run_store_unavailable",
+                    );
+                }
+            };
+
+        let status =
+            run.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+
+        let response_status =
+            if pending_status(status) {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::OK
+            };
+
+        return (
+            response_status,
+            Json(json!({
+                "idempotent_replay": true,
+                "observation": {
+                    "id": existing_id,
+                },
+                "run": run,
+            })),
+        );
+    }
+
+    let existing_observation =
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT id
+            FROM observations
+            WHERE id = $1
+              AND run_id = $2
+              AND workspace_id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&observation_id)
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .fetch_optional(&mut *tx)
+        .await;
+
+    let existing_observation =
+        match existing_observation {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "observation_store_unavailable",
+                );
+            }
+        };
+
+    if existing_observation.is_some() {
+        return api_error(
+            StatusCode::CONFLICT,
+            "observation_id_already_recorded",
+        );
+    }
+
+    let run_row =
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                Option<String>,
+                Option<i32>,
+                Option<String>,
+            ),
+        >(
+            r#"
+            SELECT
+                r.status,
+                d.id,
+                d.sequence,
+                d.decision_json::text
+            FROM runs r
+
+            LEFT JOIN LATERAL (
+                SELECT
+                    id,
+                    sequence,
+                    decision_json
+                FROM decisions
+                WHERE run_id = r.id
+                  AND workspace_id =
+                      r.workspace_id
+                ORDER BY sequence DESC
+                LIMIT 1
+            ) d ON true
+
+            WHERE r.id = $1
+              AND r.workspace_id = $2
+
+            FOR UPDATE OF r
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .fetch_optional(&mut *tx)
+        .await;
+
+    let run_row =
+        match run_row {
+            Ok(Some(value)) => value,
+
+            Ok(None) => {
+                return api_error(
+                    StatusCode::NOT_FOUND,
+                    "run_not_found",
+                );
+            }
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "run_store_unavailable",
+                );
+            }
+        };
+
+    if run_row.0 != "awaiting_observation" {
+        return api_error(
+            StatusCode::CONFLICT,
+            "run_not_awaiting_observation",
+        );
+    }
+
+    let decision_id =
+        match run_row.1 {
+            Some(value) => value,
+
+            None => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "run_has_no_decision",
+                );
+            }
+        };
+
+    if requested_decision_id
+        != decision_id
+    {
+        return api_error(
+            StatusCode::CONFLICT,
+            "observation_decision_mismatch",
+        );
+    }
+
+    let decision_sequence =
+        match run_row.2 {
+            Some(value) if value > 0 => value,
+
+            _ => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "run_has_no_decision",
+                );
+            }
+        };
+
+    let decision_json =
+        match run_row.3
+            .and_then(|value| {
+                serde_json::from_str::<Value>(
+                    &value
+                )
+                .ok()
+            })
+        {
+            Some(value) => value,
+
+            None => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "run_decision_invalid",
+                );
+            }
+        };
+
+    if decision_json
+        .get("status")
+        .and_then(Value::as_str)
+        != Some("requires_action")
+    {
+        return api_error(
+            StatusCode::CONFLICT,
+            "decision_not_awaiting_observation",
+        );
+    }
+
+    let inserted =
+        sqlx::query(
+            r#"
+            INSERT INTO observations (
+                id,
+                run_id,
+                workspace_id,
+                sequence,
+                observation_json,
+                decision_id,
+                idempotency_key,
+                request_hash
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5::jsonb,
+                $6,
+                $7,
+                $8
+            )
+            ON CONFLICT (
+                run_id,
+                sequence
+            )
+            DO NOTHING
+            "#,
+        )
+        .bind(&observation_id)
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .bind(decision_sequence)
+        .bind(&result_json)
+        .bind(&decision_id)
+        .bind(&idempotency_key)
+        .bind(&request_hash)
+        .execute(&mut *tx)
+        .await;
+
+    let inserted =
+        match inserted {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "observation_store_unavailable",
+                );
+            }
+        };
+
+    if inserted.rows_affected() != 1 {
+        return api_error(
+            StatusCode::CONFLICT,
+            "observation_already_recorded",
+        );
+    }
+
+    let operation_sequence =
+        decision_sequence + 1;
+
+    let operation_id =
+        deterministic_id(
+            "op",
+            &format!(
+                "{run_id}:{operation_sequence}"
+            ),
+        );
+
+    let operation_insert =
+        sqlx::query(
+            r#"
+            INSERT INTO operations (
+                id,
+                run_id,
+                workspace_id,
+                sequence,
+                kind,
+                status,
+                max_attempts
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                'observation_continuation',
+                'queued',
+                3
+            )
+            ON CONFLICT (
+                run_id,
+                sequence
+            )
+            DO NOTHING
+            "#,
+        )
+        .bind(&operation_id)
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .bind(operation_sequence)
+        .execute(&mut *tx)
+        .await;
+
+    let operation_insert =
+        match operation_insert {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "operation_store_unavailable",
+                );
+            }
+        };
+
+    if operation_insert.rows_affected() != 1 {
+        return api_error(
+            StatusCode::CONFLICT,
+            "continuation_already_exists",
+        );
+    }
+
+    let run_update =
+        sqlx::query(
+            r#"
+            UPDATE runs
+            SET
+                status = 'queued',
+                error_code = NULL,
+                error_retryable = NULL,
+                updated_at = now(),
+                completed_at = NULL
+            WHERE id = $1
+              AND workspace_id = $2
+              AND status =
+                  'awaiting_observation'
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .execute(&mut *tx)
+        .await;
+
+    let run_update =
+        match run_update {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "run_store_unavailable",
+                );
+            }
+        };
+
+    if run_update.rows_affected() != 1 {
+        return api_error(
+            StatusCode::CONFLICT,
+            "run_not_awaiting_observation",
+        );
+    }
+
+    if tx.commit().await.is_err() {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "observation_store_unavailable",
+        );
+    }
+
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "idempotent_replay": false,
+            "observation": {
+                "id": observation_id,
+                "sequence": decision_sequence,
+                "decision_id": decision_id,
+                "status": payload["result"]["status"],
+            },
+            "run": {
+                "id": run_id,
+                "status": "queued",
+            },
+        })),
+    )
+}
+
+
 async fn fail_exhausted_operations(
     tx: &mut sqlx::Transaction<
         '_,
@@ -1039,6 +1732,8 @@ async fn claim_next_operation(
             operation.id,
             operation.run_id,
             operation.workspace_id,
+            operation.sequence,
+            operation.kind,
             operation.attempt_count,
             operation.max_attempts
         "#,
@@ -1063,6 +1758,16 @@ async fn claim_next_operation(
             workspace_id:
                 row.try_get(
                     "workspace_id"
+                )?,
+
+            sequence:
+                row.try_get(
+                    "sequence"
+                )?,
+
+            kind:
+                row.try_get(
+                    "kind"
                 )?,
 
             attempt_count:
@@ -1174,8 +1879,9 @@ async fn complete_operation(
         deterministic_id(
             "dec",
             &format!(
-                "{}:1",
-                operation.run_id
+                "{}:{}",
+                operation.run_id,
+                operation.sequence
             ),
         );
 
@@ -1227,12 +1933,12 @@ async fn complete_operation(
             $1,
             $2,
             $3,
-            1,
-            $4::jsonb,
-            $5,
+            $4,
+            $5::jsonb,
             $6,
             $7,
-            $8
+            $8,
+            $9
         )
 
         ON CONFLICT (
@@ -1260,6 +1966,7 @@ async fn complete_operation(
     .bind(&decision_id)
     .bind(&operation.run_id)
     .bind(&operation.workspace_id)
+    .bind(operation.sequence)
     .bind(&decision_json)
     .bind(provider_name)
     .bind(model)
@@ -1567,10 +2274,292 @@ async fn process_operation(
             }
         };
 
+    let mut latest_observation:
+        Option<Value> = None;
+
+    if operation.kind
+        == "observation_continuation"
+    {
+        let observation_sequence =
+            operation.sequence - 1;
+
+        if observation_sequence <= 0 {
+            record_failure(
+                state,
+                operation,
+                "invalid_observation_sequence",
+                false,
+            )
+            .await?;
+
+            return Ok(());
+        }
+
+        let episode_row =
+            sqlx::query_as::<
+                _,
+                (
+                    String,
+                    String,
+                    String,
+                    String,
+                    String,
+                ),
+            >(
+                r#"
+                SELECT
+                    o.id,
+                    o.decision_id,
+                    o.observation_json::text,
+                    d.decision_json::text,
+                    COALESCE(
+                        r.request_payload
+                            ->> 'objective',
+                        ''
+                    )
+                FROM observations o
+
+                JOIN decisions d
+                  ON d.id = o.decision_id
+                 AND d.run_id = o.run_id
+                 AND d.workspace_id =
+                     o.workspace_id
+
+                JOIN runs r
+                  ON r.id = o.run_id
+                 AND r.workspace_id =
+                     o.workspace_id
+
+                WHERE o.run_id = $1
+                  AND o.workspace_id = $2
+                  AND o.sequence = $3
+                "#,
+            )
+            .bind(&operation.run_id)
+            .bind(&operation.workspace_id)
+            .bind(observation_sequence)
+            .fetch_optional(&state.db)
+            .await?;
+
+        let Some((
+            observation_id,
+            decision_id,
+            observation_text,
+            decision_text,
+            objective,
+        )) = episode_row
+        else {
+            record_failure(
+                state,
+                operation,
+                "observation_not_found",
+                false,
+            )
+            .await?;
+
+            return Ok(());
+        };
+
+        let observation_value =
+            match serde_json::from_str::<Value>(
+                &observation_text
+            ) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    record_failure(
+                        state,
+                        operation,
+                        "invalid_observation_json",
+                        false,
+                    )
+                    .await?;
+
+                    return Ok(());
+                }
+            };
+
+        let decision_value =
+            match serde_json::from_str::<Value>(
+                &decision_text
+            ) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    record_failure(
+                        state,
+                        operation,
+                        "invalid_decision_json",
+                        false,
+                    )
+                    .await?;
+
+                    return Ok(());
+                }
+            };
+
+        let episode_url = format!(
+            "{}/memory/episodes",
+            state.runtime_url
+                .trim_end_matches('/')
+        );
+
+        let episode_payload = json!({
+            "workspace_id":
+                operation.workspace_id,
+            "run_id":
+                operation.run_id,
+            "decision_id":
+                decision_id,
+            "observation_id":
+                observation_id,
+            "objective":
+                objective,
+            "decision":
+                decision_value,
+            "result":
+                observation_value,
+        });
+
+        let episode_response =
+            state
+                .client
+                .post(episode_url)
+                .header(
+                    "x-kiyt-internal-token",
+                    &state.internal_token,
+                )
+                .json(&episode_payload)
+                .send()
+                .await;
+
+        let episode_response =
+            match episode_response {
+                Ok(value) => value,
+
+                Err(_) => {
+                    record_failure(
+                        state,
+                        operation,
+                        "episodic_sync_transport_failure",
+                        true,
+                    )
+                    .await?;
+
+                    return Ok(());
+                }
+            };
+
+        let episode_status =
+            episode_response.status();
+
+        if !episode_status.is_success() {
+            let retryable =
+                episode_status.is_server_error()
+                    || episode_status
+                        == StatusCode::
+                            TOO_MANY_REQUESTS;
+
+            record_failure(
+                state,
+                operation,
+                "episodic_sync_failure",
+                retryable,
+            )
+            .await?;
+
+            return Ok(());
+        }
+
+        latest_observation =
+            Some(observation_value);
+    } else if operation.kind
+        != "cognitive_decision"
+    {
+        record_failure(
+            state,
+            operation,
+            "unknown_operation_kind",
+            false,
+        )
+        .await?;
+
+        return Ok(());
+    }
+
     let url = format!(
         "{}/cognition/decide",
         state.runtime_url.trim_end_matches('/')
     );
+
+    let mut runtime_payload = payload;
+
+    let runtime_object =
+        match runtime_payload.as_object_mut() {
+            Some(value) => value,
+
+            None => {
+                record_failure(
+                    state,
+                    operation,
+                    "invalid_durable_request_payload",
+                    false,
+                )
+                .await?;
+
+                return Ok(());
+            }
+        };
+
+    //
+    // Tenant/run identity comes from the claimed
+    // durable operation, never from customer input.
+    //
+    runtime_object.insert(
+        "workspace_id".to_string(),
+        Value::String(
+            operation.workspace_id.clone()
+        ),
+    );
+
+    runtime_object.insert(
+        "run_id".to_string(),
+        Value::String(
+            operation.run_id.clone()
+        ),
+    );
+
+    if latest_observation.is_some()
+        && runtime_object
+            .get("context")
+            .and_then(Value::as_object)
+            .is_none()
+    {
+        record_failure(
+            state,
+            operation,
+            "invalid_durable_context",
+            false,
+        )
+        .await?;
+
+        return Ok(());
+    }
+
+    if let Some(observation) =
+        latest_observation
+    {
+        runtime_object
+            .get_mut("context")
+            .and_then(Value::as_object_mut)
+            .expect(
+                "context validated as object"
+            )
+            .insert(
+                "latest_observation".to_string(),
+                observation,
+            );
+    }
 
     let response = state
         .client
@@ -1579,7 +2568,7 @@ async fn process_operation(
             "x-kiyt-internal-token",
             &state.internal_token,
         )
-        .json(&payload)
+        .json(&runtime_payload)
         .send()
         .await;
 
@@ -1920,6 +2909,10 @@ async fn main() {
         .route(
             "/api/v1/runs/{run_id}",
             get(get_run),
+        )
+        .route(
+            "/api/v1/runs/{run_id}/observations",
+            post(create_observation),
         )
         .with_state(state);
 

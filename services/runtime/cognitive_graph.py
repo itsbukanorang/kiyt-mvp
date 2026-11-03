@@ -5,7 +5,13 @@ Rust/PostgreSQL own durable operational lifecycle.
 No customer actions are executed here.
 """
 
-from typing import Any, Awaitable, Callable, TypedDict
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    NotRequired,
+    TypedDict,
+)
 
 from langgraph.graph import StateGraph, START, END
 
@@ -15,6 +21,9 @@ class CognitiveState(TypedDict):
     context: dict[str, Any]
     available_actions: list[dict[str, Any]]
     decision: dict[str, Any] | None
+    workspace_id: NotRequired[str]
+    run_id: NotRequired[str]
+    memory: NotRequired[dict[str, Any]]
 
 
 Reasoner = Callable[
@@ -22,9 +31,17 @@ Reasoner = Callable[
     Awaitable[dict[str, Any]],
 ]
 
+Recaller = Callable[
+    [CognitiveState],
+    Awaitable[dict[str, Any]],
+]
 
-def build_graph(reasoner: Reasoner):
-    """Inject the actual model reasoning implementation."""
+
+def build_graph(
+    reasoner: Reasoner,
+    recaller: Recaller | None = None,
+):
+    """Inject model reasoning and optional KIYT memory recall."""
 
     async def perceive(state: CognitiveState):
         objective = state["objective"]
@@ -50,6 +67,23 @@ def build_graph(reasoner: Reasoner):
             raise ValueError("duplicate_action_name")
 
         return {}
+
+    async def recall(state: CognitiveState):
+        if recaller is None:
+            return {
+                "memory": {},
+            }
+
+        memory = await recaller(state)
+
+        if not isinstance(memory, dict):
+            raise ValueError(
+                "invalid_memory_recall"
+            )
+
+        return {
+            "memory": memory,
+        }
 
     async def reason(state: CognitiveState):
         decision = await reasoner(state)
@@ -101,11 +135,13 @@ def build_graph(reasoner: Reasoner):
     graph = StateGraph(CognitiveState)
 
     graph.add_node("perceive", perceive)
+    graph.add_node("recall", recall)
     graph.add_node("reason", reason)
     graph.add_node("decide", decide)
 
     graph.add_edge(START, "perceive")
-    graph.add_edge("perceive", "reason")
+    graph.add_edge("perceive", "recall")
+    graph.add_edge("recall", "reason")
     graph.add_edge("reason", "decide")
     graph.add_edge("decide", END)
 

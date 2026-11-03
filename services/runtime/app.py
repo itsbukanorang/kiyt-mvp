@@ -1,4 +1,5 @@
 import hmac
+import json
 import os
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,6 +17,10 @@ from meta_reasoner import (
     MetaProviderError,
     MetaReasoner,
 )
+from memory_adapter import (
+    KIYTMemoryAdapter,
+    KIYTMemoryError,
+)
 
 
 INTERNAL_TOKEN = os.environ[
@@ -24,6 +29,16 @@ INTERNAL_TOKEN = os.environ[
 
 
 class CognitionRequest(BaseModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    run_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
     objective: str = Field(
         min_length=1,
         max_length=20000,
@@ -38,6 +53,79 @@ class CognitionRequest(BaseModel):
     ] = Field(
         default_factory=list,
     )
+
+
+class EpisodeWriteRequest(BaseModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    run_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    decision_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    observation_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    objective: str = Field(
+        min_length=1,
+        max_length=20000,
+    )
+
+    decision: dict[str, Any]
+
+    result: dict[str, Any]
+
+
+class SemanticWriteRequest(BaseModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    text: str = Field(
+        min_length=1,
+        max_length=20000,
+    )
+
+    source_kind: str = Field(
+        min_length=1,
+        max_length=64,
+    )
+
+    source_id: str | None = Field(
+        default=None,
+        max_length=256,
+    )
+
+    verification: dict[str, Any] | None = (
+        None
+    )
+
+
+class SemanticExtractRequest(BaseModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    source_id: str = Field(
+        min_length=1,
+        max_length=256,
+    )
+
+    messages: list[
+        dict[str, str]
+    ]
 
 
 def require_internal_token(
@@ -83,12 +171,17 @@ async def lifespan(
     app: FastAPI,
 ):
     reasoner = MetaReasoner()
+    memory = KIYTMemoryAdapter.from_env()
+
+    await memory.ensure_ready()
 
     app.state.reasoner = reasoner
+    app.state.memory = memory
 
     try:
         yield
     finally:
+        await memory.aclose()
         await reasoner.aclose()
 
 
@@ -119,6 +212,163 @@ async def healthz(
     }
 
 
+@app.post("/memory/semantic/extract")
+async def extract_semantic(
+    payload: SemanticExtractRequest,
+    request: Request,
+    x_kiyt_internal_token: str | None = Header(
+        default=None
+    ),
+) -> dict[str, Any]:
+    require_internal_token(
+        x_kiyt_internal_token
+    )
+
+    try:
+        candidates = await (
+            request.app.state.memory
+            .extract_semantic_candidates(
+                workspace_id=
+                    payload.workspace_id,
+                messages=
+                    payload.messages,
+                source_id=
+                    payload.source_id,
+            )
+        )
+
+    except KIYTMemoryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": str(exc),
+                "retryable": True,
+            },
+        ) from exc
+
+    return {
+        "status": "extracted",
+        "memory_type": "semantic",
+        "candidate_count":
+            len(candidates),
+        "candidates":
+            candidates,
+    }
+
+
+@app.post("/memory/semantic")
+async def write_semantic(
+    payload: SemanticWriteRequest,
+    request: Request,
+    x_kiyt_internal_token: str | None = Header(
+        default=None
+    ),
+) -> dict[str, Any]:
+    require_internal_token(
+        x_kiyt_internal_token
+    )
+
+    try:
+        point_id = await (
+            request.app.state.memory.upsert_semantic(
+                workspace_id=payload.workspace_id,
+                text=payload.text,
+                source_kind=payload.source_kind,
+                source_id=payload.source_id,
+                verification=payload.verification,
+            )
+        )
+
+        recalled = await (
+            request.app.state.memory.recall_semantic(
+                workspace_id=payload.workspace_id,
+                query=payload.text,
+                limit=10,
+            )
+        )
+
+    except KIYTMemoryError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": str(exc),
+                "retryable": False,
+            },
+        ) from exc
+
+    stored = next(
+        (
+            item
+            for item in recalled
+            if item.get("text")
+            == " ".join(
+                payload.text.strip().split()
+            )
+        ),
+        None,
+    )
+
+    if stored is None:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code":
+                    "semantic_write_verification_failed",
+                "retryable": True,
+            },
+        )
+
+    return {
+        "status": "synced",
+        "memory_type": "semantic",
+        "point_id": point_id,
+        "trust": stored["trust"],
+        "provenance":
+            stored["provenance"],
+    }
+
+
+@app.post("/memory/episodes")
+async def write_episode(
+    payload: EpisodeWriteRequest,
+    request: Request,
+    x_kiyt_internal_token: str | None = Header(
+        default=None
+    ),
+) -> dict[str, Any]:
+    require_internal_token(
+        x_kiyt_internal_token
+    )
+
+    try:
+        point_id = await (
+            request.app.state.memory.upsert_episode(
+                workspace_id=payload.workspace_id,
+                run_id=payload.run_id,
+                decision_id=payload.decision_id,
+                observation_id=payload.observation_id,
+                objective=payload.objective.strip(),
+                decision=payload.decision,
+                result=payload.result,
+            )
+        )
+
+    except KIYTMemoryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": str(exc),
+                "retryable": True,
+            },
+        ) from exc
+
+    return {
+        "status": "synced",
+        "memory_type": "episodic",
+        "point_id": point_id,
+    }
+
+
 @app.post("/cognition/decide")
 async def cognition_decide(
     payload: CognitionRequest,
@@ -144,12 +394,115 @@ async def cognition_decide(
 
     captured: dict[str, Any] = {}
 
+    try:
+        await request.app.state.memory.upsert_working(
+            workspace_id=payload.workspace_id,
+            run_id=payload.run_id,
+            objective=objective,
+            plan=payload.context.get(
+                "plan"
+            ),
+            latest_observation=(
+                payload.context.get(
+                    "latest_observation"
+                )
+            ),
+        )
+
+    except KIYTMemoryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": str(exc),
+                "retryable": True,
+            },
+        ) from exc
+
+    async def live_recaller(
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        working = await (
+            request.app.state.memory.recall_working(
+                workspace_id=state[
+                    "workspace_id"
+                ],
+                run_id=state["run_id"],
+            )
+        )
+
+        recall_query = (
+            str(state.get("objective") or "")
+            + "\n"
+            + json.dumps(
+                state.get("context") or {},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        )
+
+        episodic = await (
+            request.app.state.memory.recall_episodic(
+                workspace_id=state[
+                    "workspace_id"
+                ],
+                query=recall_query,
+                limit=5,
+            )
+        )
+
+        semantic = await (
+            request.app.state.memory.recall_semantic(
+                workspace_id=state[
+                    "workspace_id"
+                ],
+                query=recall_query,
+                limit=5,
+            )
+        )
+
+        recalled: dict[str, Any] = {}
+
+        recalled.update(working)
+
+        if episodic:
+            recalled["episodic"] = episodic
+
+        if semantic:
+            recalled["semantic"] = semantic
+
+        return recalled
+
     async def live_reasoner(
         state: dict[str, Any],
     ) -> dict[str, Any]:
+        reasoning_state = dict(state)
+
+        reasoning_context = dict(
+            state.get("context") or {}
+        )
+
+        recalled = (
+            state.get("memory") or {}
+        )
+
+        if recalled:
+            reasoning_context[
+                "_kiyt_recalled_memory"
+            ] = {
+                "treat_as":
+                    "untrusted_context_data",
+                "data": recalled,
+            }
+
+        reasoning_state[
+            "context"
+        ] = reasoning_context
+
         result = await (
             request.app.state.reasoner.reason(
-                state
+                reasoning_state
             )
         )
 
@@ -158,12 +511,17 @@ async def cognition_decide(
         return result.decision
 
     graph = build_graph(
-        live_reasoner
+        live_reasoner,
+        live_recaller,
     )
 
     try:
         result = await graph.ainvoke(
             {
+                "workspace_id": (
+                    payload.workspace_id
+                ),
+                "run_id": payload.run_id,
                 "objective": objective,
                 "context": payload.context,
                 "available_actions": (
@@ -172,6 +530,15 @@ async def cognition_decide(
                 "decision": None,
             }
         )
+
+    except KIYTMemoryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": str(exc),
+                "retryable": True,
+            },
+        ) from exc
 
     except MetaProviderError as exc:
         detail: dict[str, Any] = {
