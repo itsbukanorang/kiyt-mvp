@@ -44,6 +44,7 @@ services:
     restart: unless-stopped
 
     env_file:
+      - /home/kiyt-mvp/private/gateway-db.env
       - /home/kiyt-mvp/private/runtime.env
 
     environment:

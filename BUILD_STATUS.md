@@ -14,11 +14,11 @@ FOUNDATION
 
 MEMBER / TENANT
 [03] Better Auth                      PASS
-[04] Workspace + Members + API Key   IN_PROGRESS
+[04] Workspace + Members + API Key   PASS
      04A Multi-workspace             PASS
      04B-1 Members / Invites         PASS
      API Key Console                 PASS
-     04B-2 Rust Bearer Auth          PENDING
+     04B-2 Rust Bearer Auth          PASS
 
 COGNITIVE CORE
 [05] First Cognitive Decision         NOT_STARTED
@@ -234,18 +234,24 @@ Hard-tested:
 
 ### 04B-2 - Rust Bearer Authentication
 
-Status: `PENDING`
+Status: `PASS`
 
-Required before Module 04 becomes PASS:
-- `Authorization: Bearer kiyt_<secret>`
-- SHA-256 key lookup
-- reject invalid/revoked key
-- derive workspace from key
-- update `last_used_at`
-- enforce tenant isolation in Rust
+Hard-tested:
+- missing Bearer token returns HTTP 401
+- malformed Bearer token returns HTTP 401
+- valid API key returns HTTP 200
+- workspace is resolved from the authenticated API key
+- caller cannot override workspace identity
+- revoked API key returns HTTP 401
+- last_used_at updates after successful authentication
+- gateway health remains PASS
+- Rust locked compile and Docker build PASS
+- ephemeral authentication probe cleanup PASS
+
+Rust is now the customer API authentication and tenant-resolution boundary.
 
 ## Next
 
-`04B-2 - Rust Bearer API Authentication`
+`05 - First Cognitive Decision`
 
-Module 05 must not start until Module 04 is fully `PASS`.
+Module 04 is fully `PASS`. Next: Module 05 - First Cognitive Decision.

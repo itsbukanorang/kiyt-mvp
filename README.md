@@ -24,7 +24,7 @@ this Git repository.
 | 01 Console + Rust/Python Runtime | PASS |
 | 02 PostgreSQL + Qdrant | PASS |
 | 03 Better Auth | PASS |
-| 04 Workspace + Members + API Key | IN_PROGRESS |
+| 04 Workspace + Members + API Key | PASS |
 | 05 First Cognitive Decision | NOT_STARTED |
 | 06 Three Memories | NOT_STARTED |
 | 07 Observation Loop | NOT_STARTED |
@@ -37,8 +37,8 @@ Module 04:
 - Multi-workspace: PASS
 - Members / invites / roles: PASS
 - API Key Console: PASS
-- Rust Bearer API Auth: PENDING
+- Rust Bearer API Auth: PASS
 
-Next: `04B-2 - Rust Bearer API Authentication`
+Next: `05 - First Cognitive Decision`
 
 <!-- KIYT_STATUS_END -->
