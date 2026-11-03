@@ -22,6 +22,7 @@ struct AppState {
     client: Client,
     runtime_url: String,
     internal_token: String,
+    console_gateway_token: String,
     db: PgPool,
 }
 
@@ -194,6 +195,71 @@ async fn authenticate_api_key(
             "invalid_or_revoked_api_key",
         )
     })
+}
+
+async fn authenticate_workspace(
+    headers: &HeaderMap,
+    state: &AppState,
+) -> Result<String, ApiAuthError> {
+    if let Some(value) =
+        headers.get("x-kiyt-console-token")
+    {
+        let token =
+            value
+                .to_str()
+                .map_err(|_| {
+                    api_error(
+                        StatusCode::UNAUTHORIZED,
+                        "invalid_console_principal",
+                    )
+                })?;
+
+        if token.is_empty()
+            || token != state.console_gateway_token
+        {
+            return Err(api_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_console_principal",
+            ));
+        }
+
+        let workspace_id =
+            headers
+                .get("x-kiyt-workspace-id")
+                .ok_or_else(|| {
+                    api_error(
+                        StatusCode::UNAUTHORIZED,
+                        "invalid_console_principal",
+                    )
+                })?
+                .to_str()
+                .map_err(|_| {
+                    api_error(
+                        StatusCode::UNAUTHORIZED,
+                        "invalid_console_principal",
+                    )
+                })?
+                .trim();
+
+        if workspace_id.is_empty()
+            || workspace_id.len() > 128
+        {
+            return Err(api_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_console_principal",
+            ));
+        }
+
+        return Ok(
+            workspace_id.to_owned()
+        );
+    }
+
+    authenticate_api_key(
+        headers,
+        state,
+    )
+    .await
 }
 
 async fn api_auth(
@@ -508,10 +574,132 @@ fn validate_observation_payload(
 }
 
 
+fn validate_feedback_payload(
+    payload: Value,
+) -> Result<Value, ApiResponse> {
+    let object =
+        payload.as_object().ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_feedback_payload",
+            )
+        })?;
+
+    let rating = object
+        .get("rating")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "feedback_rating_required",
+            )
+        })?;
+
+    if !matches!(rating, -1 | 0 | 1) {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_feedback_rating",
+        ));
+    }
+
+    let decision_id =
+        match object.get("decision_id") {
+            None | Some(Value::Null) =>
+                Value::Null,
+
+            Some(Value::String(value)) => {
+                let value = value.trim();
+
+                if value.is_empty()
+                    || value.len() > 128
+                {
+                    return Err(api_error(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "invalid_feedback_decision_id",
+                    ));
+                }
+
+                json!(value)
+            }
+
+            _ => {
+                return Err(api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_feedback_decision_id",
+                ));
+            }
+        };
+
+    let comment =
+        match object.get("comment") {
+            None | Some(Value::Null) =>
+                Value::Null,
+
+            Some(Value::String(value)) => {
+                let value = value.trim();
+
+                if value.chars().count() > 5000 {
+                    return Err(api_error(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "feedback_comment_too_large",
+                    ));
+                }
+
+                if value.is_empty() {
+                    Value::Null
+                } else {
+                    json!(value)
+                }
+            }
+
+            _ => {
+                return Err(api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_feedback_comment",
+                ));
+            }
+        };
+
+    let normalized = json!({
+        "rating": rating,
+        "decision_id": decision_id,
+        "comment": comment,
+    });
+
+    let encoded =
+        serde_json::to_vec(&normalized)
+            .map_err(|_| {
+                api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_feedback_payload",
+                )
+            })?;
+
+    if encoded.len() > 100_000 {
+        return Err(api_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "feedback_payload_too_large",
+        ));
+    }
+
+    Ok(normalized)
+}
+
+
 fn pending_status(
     status: &str,
 ) -> bool {
     matches!(status, "queued" | "running")
+}
+
+fn public_run_status(
+    status: &str,
+) -> &str {
+    match status {
+        "awaiting_observation" =>
+            "requires_action",
+        value => value,
+    }
 }
 
 async fn load_run_json(
@@ -702,7 +890,8 @@ async fn load_run_json(
 
     Ok(Some(json!({
         "id": id,
-        "status": status,
+        "status":
+            public_run_status(&status),
         "decision": decision,
         "provider": provider,
 
@@ -729,7 +918,7 @@ async fn create_run(
     Json(payload): Json<Value>,
 ) -> ApiResponse {
     let workspace_id =
-        match authenticate_api_key(
+        match authenticate_workspace(
             &headers,
             &state,
         )
@@ -918,9 +1107,29 @@ async fn create_run(
                 StatusCode::OK
             };
 
+        let public_status =
+            run.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+
+        let replay_operation_id =
+            deterministic_id(
+                "op",
+                &format!(
+                    "{}:1",
+                    existing.0
+                ),
+            );
+
         return (
             response_status,
             Json(json!({
+                "run_id":
+                    &existing.0,
+                "operation_id":
+                    replay_operation_id,
+                "status":
+                    public_status,
                 "idempotent_replay":
                     true,
                 "run":
@@ -975,10 +1184,16 @@ async fn create_run(
     (
         StatusCode::ACCEPTED,
         Json(json!({
+            "run_id":
+                &run_id,
+            "operation_id":
+                &operation_id,
+            "status":
+                "queued",
             "idempotent_replay":
                 false,
             "run": {
-                "id": run_id,
+                "id": &run_id,
                 "status": "queued",
             },
         })),
@@ -991,7 +1206,7 @@ async fn get_run(
     headers: HeaderMap,
 ) -> ApiResponse {
     let workspace_id =
-        match authenticate_api_key(
+        match authenticate_workspace(
             &headers,
             &state,
         )
@@ -1034,7 +1249,7 @@ async fn create_observation(
     Json(payload): Json<Value>,
 ) -> ApiResponse {
     let workspace_id =
-        match authenticate_api_key(
+        match authenticate_workspace(
             &headers,
             &state,
         )
@@ -1128,12 +1343,13 @@ async fn create_observation(
     let existing =
         sqlx::query_as::<
             _,
-            (String, String),
+            (String, String, i32),
         >(
             r#"
             SELECT
                 id,
-                request_hash
+                request_hash,
+                sequence
             FROM observations
             WHERE run_id = $1
               AND workspace_id = $2
@@ -1161,6 +1377,7 @@ async fn create_observation(
     if let Some((
         existing_id,
         existing_hash,
+        existing_sequence,
     )) = existing
     {
         if existing_hash != request_hash {
@@ -1214,9 +1431,24 @@ async fn create_observation(
                 StatusCode::OK
             };
 
+        let replay_operation_id =
+            deterministic_id(
+                "op",
+                &format!(
+                    "{run_id}:{}",
+                    existing_sequence + 1
+                ),
+            );
+
         return (
             response_status,
             Json(json!({
+                "run_id":
+                    &run_id,
+                "operation_id":
+                    replay_operation_id,
+                "status":
+                    status,
                 "idempotent_replay": true,
                 "observation": {
                     "id": existing_id,
@@ -1568,6 +1800,12 @@ async fn create_observation(
     (
         StatusCode::ACCEPTED,
         Json(json!({
+            "run_id":
+                &run_id,
+            "operation_id":
+                &operation_id,
+            "status":
+                "queued",
             "idempotent_replay": false,
             "observation": {
                 "id": observation_id,
@@ -1576,11 +1814,290 @@ async fn create_observation(
                 "status": payload["result"]["status"],
             },
             "run": {
-                "id": run_id,
+                "id": &run_id,
                 "status": "queued",
             },
         })),
     )
+}
+
+
+async fn create_feedback(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Value>,
+) -> ApiResponse {
+    let workspace_id =
+        match authenticate_workspace(
+            &headers,
+            &state,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let idempotency_key =
+        match read_idempotency_key(
+            &headers,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let payload =
+        match validate_feedback_payload(
+            payload,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error,
+        };
+
+    let encoded =
+        match serde_json::to_string(
+            &payload,
+        ) {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_feedback_payload",
+                );
+            }
+        };
+
+    let request_hash =
+        sha256_hex(&encoded);
+
+    let feedback_id =
+        deterministic_id(
+            "fb",
+            &format!(
+                "{workspace_id}\0{run_id}\0{idempotency_key}"
+            ),
+        );
+
+    let rating =
+        payload
+            .get("rating")
+            .and_then(Value::as_i64)
+            .unwrap_or_default()
+            as i16;
+
+    let decision_id =
+        payload
+            .get("decision_id")
+            .and_then(Value::as_str);
+
+    let comment =
+        payload
+            .get("comment")
+            .and_then(Value::as_str);
+
+    let run_exists =
+        sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT 1
+            FROM runs
+            WHERE id = $1
+              AND workspace_id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(&run_id)
+        .bind(&workspace_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    match run_exists {
+        Ok(Some(_)) => {}
+
+        Ok(None) => {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                "run_not_found",
+            );
+        }
+
+        Err(_) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "feedback_store_unavailable",
+            );
+        }
+    }
+
+    if let Some(decision_id) =
+        decision_id
+    {
+        let decision_exists =
+            sqlx::query_scalar::<_, i32>(
+                r#"
+                SELECT 1
+                FROM decisions
+                WHERE id = $1
+                  AND run_id = $2
+                  AND workspace_id = $3
+                LIMIT 1
+                "#,
+            )
+            .bind(decision_id)
+            .bind(&run_id)
+            .bind(&workspace_id)
+            .fetch_optional(&state.db)
+            .await;
+
+        match decision_exists {
+            Ok(Some(_)) => {}
+
+            Ok(None) => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "feedback_decision_mismatch",
+                );
+            }
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "feedback_store_unavailable",
+                );
+            }
+        }
+    }
+
+    let insert =
+        sqlx::query(
+            r#"
+            INSERT INTO feedback_events (
+                id,
+                run_id,
+                decision_id,
+                workspace_id,
+                rating,
+                comment,
+                idempotency_key,
+                request_hash
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8
+            )
+            ON CONFLICT (
+                workspace_id,
+                run_id,
+                idempotency_key
+            )
+            DO NOTHING
+            "#,
+        )
+        .bind(&feedback_id)
+        .bind(&run_id)
+        .bind(decision_id)
+        .bind(&workspace_id)
+        .bind(rating)
+        .bind(comment)
+        .bind(&idempotency_key)
+        .bind(&request_hash)
+        .execute(&state.db)
+        .await;
+
+    let insert =
+        match insert {
+            Ok(value) => value,
+
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "feedback_store_unavailable",
+                );
+            }
+        };
+
+    if insert.rows_affected() == 1 {
+        return (
+            StatusCode::CREATED,
+            Json(json!({
+                "idempotent_replay": false,
+                "feedback": {
+                    "id": feedback_id,
+                    "run_id": run_id,
+                    "decision_id": decision_id,
+                    "rating": rating,
+                },
+            })),
+        );
+    }
+
+    let existing =
+        sqlx::query_as::<
+            _,
+            (String, String),
+        >(
+            r#"
+            SELECT
+                id,
+                request_hash
+            FROM feedback_events
+            WHERE workspace_id = $1
+              AND run_id = $2
+              AND idempotency_key = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&workspace_id)
+        .bind(&run_id)
+        .bind(&idempotency_key)
+        .fetch_optional(&state.db)
+        .await;
+
+    match existing {
+        Ok(Some((
+            existing_id,
+            existing_hash,
+        ))) => {
+            if existing_hash
+                != request_hash
+            {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "idempotency_key_payload_conflict",
+                );
+            }
+
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "idempotent_replay": true,
+                    "feedback": {
+                        "id": existing_id,
+                        "run_id": run_id,
+                        "decision_id": decision_id,
+                        "rating": rating,
+                    },
+                })),
+            )
+        }
+
+        Ok(None) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "feedback_store_unavailable",
+        ),
+
+        Err(_) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "feedback_store_unavailable",
+        ),
+    }
 }
 
 
@@ -2818,6 +3335,14 @@ async fn main() {
                 "KIYT_INTERNAL_TOKEN is required"
             );
 
+    let console_gateway_token =
+        env::var(
+            "KIYT_CONSOLE_GATEWAY_TOKEN"
+        )
+        .expect(
+            "KIYT_CONSOLE_GATEWAY_TOKEN is required"
+        );
+
     let database_url =
         env::var("KIYT_DATABASE_URL")
             .expect(
@@ -2861,6 +3386,7 @@ async fn main() {
         client,
         runtime_url,
         internal_token,
+        console_gateway_token,
         db,
     };
 
@@ -2913,6 +3439,10 @@ async fn main() {
         .route(
             "/api/v1/runs/{run_id}/observations",
             post(create_observation),
+        )
+        .route(
+            "/api/v1/runs/{run_id}/feedback",
+            post(create_feedback),
         )
         .with_state(state);
 
