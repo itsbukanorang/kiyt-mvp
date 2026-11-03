@@ -11,8 +11,8 @@ Updated: 3 November 2026 (UTC+7)
 | 02 PostgreSQL + Qdrant | PASS | Private persistent datastores |
 | 03 Better Auth | PASS | Signup, login, logout, session and protected console |
 | 04 Workspace + members + API key | PASS | Multi-workspace, invites/roles, API-key console and Rust Bearer auth |
-| 05 First cognitive decision | NEXT | Cognitive run endpoint and real inference are next |
-| 06 Three memories | NOT_STARTED | Working / episodic / semantic memory path not implemented yet |
+| 05 First cognitive decision | PASS | Production acceptance PASS: real Muse Spark 1.3, 10/10 public decision cases, durable PostgreSQL ledger, auth negative, workspace isolation, idempotency, recovery gates and final public health verified |
+| 06 Three memories | NEXT | Working / episodic / semantic memory path not implemented yet |
 | 07 Evaluation + online RL | NOT_STARTED | Evaluation, reward and policy learner not implemented yet |
 | 08 Playground integration | NOT_STARTED | UI exists; real cognitive API integration pending |
 | 09 Runs + usage + billing | NOT_STARTED | Real run / usage data path pending |
@@ -62,3 +62,27 @@ Module 05 is not PASS until the request reaches the real provider, the decision 
 ## Status Rule
 
 A module is marked PASS only after its real behavior is implemented and verified. No secret, raw customer content, raw invite token, raw API key, credential, or private environment value belongs in this file.
+
+## Module 05 production completion
+
+Module 05 completed production acceptance on 3 November 2026 (UTC+7).
+
+- Source commit: `192a3f2`.
+- Production migration `005_durable_runs.sql`: PASS.
+- Rust gateway + private Python cognitive runtime: deployed and healthy.
+- Real Meta Muse Spark 1.3 decision path: PASS.
+- Public decision acceptance: 10/10 PASS.
+- Authentication-negative behavior: PASS.
+- Cross-workspace isolation: PASS.
+- Idempotent replay: PASS.
+- Idempotency payload conflict: PASS.
+- Durable PostgreSQL evidence: `10|10|10|20|10`.
+- Bounded worker execution: PASS.
+- Expired-lease recovery: PASS.
+- Max-attempt exhaustion: PASS.
+- Acceptance fixture cleanup: PASS.
+- Final public health: PASS.
+- Production-local `compose.yaml` remains intentionally ignored by Git.
+- Runtime secrets remain outside Git; `/etc/kiyt/runtime.env` is not committed.
+
+Next milestone: Module 06 — Mem0 + three memories.
