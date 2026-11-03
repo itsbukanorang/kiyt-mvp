@@ -17,9 +17,10 @@ Updated: 4 November 2026 (UTC+7)
 | 08 Playground integration | NEXT | Connect existing Playground UI to the real cognitive API |
 | 09 Runs + usage + billing | NOT_STARTED | Real run / usage data path pending |
 | 10 API documentation | NOT_STARTED | External quickstart pending |
-| 11 Release verification | NOT_STARTED | Depends on Modules 05–10 |
+| 11 Release verification | NOT_STARTED | Final production release gate after Modules 05–10 |
+| 12 Global KIYT learning | NOT_STARTED | Permissioned, abstracted global learning pipeline with holdout evaluation and manual activation |
 
-**7 of 12 modules PASS (58.3%).**
+**Modules 00–06 PASS (7 completed milestones). Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
 
 ## Module 04 Evidence
 
@@ -64,12 +65,12 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 - Modules 00–06: PASS.
 - Module 06 — Three memories: PASS (60/60 production hard tests).
-- Overall module count: 7/12 PASS (58.3%).
-- Production source: `main@6398baee494098671b738ae3e24fbada461a2348`.
+- Completed milestones: Modules 00–06 PASS.
+- Pre-Module 08 API contract hardening: PASS at `main@75d75de6aff6e8a9aa67d5d8fbe780933d591339`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
 - Production runtime/gateway health: PASS.
-- Secrets and production-local `compose.yaml`: outside Git.
+- Production secrets and deployment-only configuration remain outside the public repository.
 
 ## Status Rule
 
@@ -94,8 +95,8 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Max-attempt exhaustion: PASS.
 - Acceptance fixture cleanup: PASS.
 - Final public health: PASS.
-- Production-local `compose.yaml` remains intentionally ignored by Git.
-- Runtime secrets remain outside Git; `/etc/kiyt/runtime.env` is not committed.
+- Deployment-only configuration remains outside the public repository.
+- Runtime secrets remain outside Git.
 
 Next milestone: Module 08 — Playground integration.
 
@@ -119,4 +120,18 @@ Module 06 completed production acceptance on 4 November 2026 (UTC+7).
 - Production health and logs: PASS.
 - Test fixtures cleaned: PASS.
 
-Execution order after Module 06: `08 → 07 → 09 → 10 → 11`.
+Execution order after Module 06: `08 → 07 → 09 → 10 → 11 → 12`.
+
+## Module 12 — Global KIYT Learning
+
+Module 12 is an extended learning milestone after the MVP service release gate. It is not required to mark Module 11 complete.
+
+Target outcome:
+
+- Learn only from usage that is explicitly eligible for global improvement.
+- Abstract and review examples before they enter a global learning dataset.
+- Exclude raw private customer memory, secrets, identifiers and proprietary content from shared learning data.
+- Train and evaluate an updated global decision model offline against a held-out evaluation set.
+- Activate a new global model version only after measured evaluation passes and a manual release decision is made.
+
+Module 12 remains **NOT_STARTED** until the learning pipeline and measured evaluation are implemented and verified.
