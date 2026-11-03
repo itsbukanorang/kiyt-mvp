@@ -19,7 +19,7 @@ Updated: 3 November 2026 (UTC+7)
 | 10 API documentation | NOT_STARTED | External quickstart pending |
 | 11 Release verification | NOT_STARTED | Depends on Modules 05–10 |
 
-**5 of 12 modules PASS.**
+**6 of 12 modules PASS (50%).**
 
 ## Module 04 Evidence
 
@@ -40,7 +40,7 @@ Hard-tested:
 - Revoked API key returns HTTP 401.
 - Successful authentication updates `last_used_at`.
 
-## Active Module — 05 First Cognitive Decision
+## Module 05 — First Cognitive Decision
 
 Target vertical slice:
 

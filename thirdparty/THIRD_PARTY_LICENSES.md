@@ -1,31 +1,21 @@
-# KIYT Third-Party License Registry
+# KIYT Open-Source Components
 
-| Component | License | Intended role | Integration status |
-|---|---|---|---|
-| LangGraph | MIT | Private cognitive graph | PLANNED |
-| Mem0 OSS | Apache-2.0 | Memory extraction, update and deduplication | PLANNED |
-| Future AGI Agent Learning Kit | Apache-2.0 | Evaluation artifacts and evidence | PLANNED |
-| MABWiser | Apache-2.0 | Online contextual-bandit learning | PLANNED |
-| jsonschema | MIT | Dynamic action-schema validation | INTEGRATED |
+## LangGraph
 
-## License provenance
+- Version: `1.2.19`
+- License: MIT
+- Role: private cognitive graph execution
+- Status: INTEGRATED
 
-License files in LICENSES/ are retrieved from official
-upstream repositories.
+KIYT integration:
 
-- LangGraph: https://github.com/langchain-ai/langgraph
-- Mem0: https://github.com/mem0ai/mem0
-- Agent Learning Kit: https://github.com/future-agi/agent-learning-kit
-- MABWiser: https://github.com/fidelity/mabwiser
+- `services/runtime/cognitive_graph.py`
+- `services/runtime/tests/test_langgraph_integration.py`
 
-Checksums are recorded in LICENSES/SHA256SUMS.
+Upstream:
 
-These source-branch license snapshots do not establish
-the exact dependency versions used in a release.
+https://github.com/langchain-ai/langgraph
 
-Before release:
-- Pin tested package versions.
-- Verify corresponding release licenses and NOTICE files.
-- Audit transitive dependencies and license obligations.
-- Record actual runtime integration tests.
-- Keep operational secrets outside the public repository.
+License:
+
+`thirdparty/LICENSES/langgraph.LICENSE`

@@ -1,21 +1,13 @@
-# KIYT Third-Party Integrations
+# KIYT Open-Source Components
 
-This directory records upstream open-source components,
-their licenses, provenance and integration status.
+This directory contains attribution and license information for
+major open-source components integrated into KIYT.
 
-Third-party source code is not vendored by default.
-Official packages will be installed with tested,
-locked versions.
+KIYT uses upstream packages through their standard package managers.
+Upstream source code is not copied into this repository unless KIYT
+intentionally vendors or modifies that source.
 
-Architecture ownership:
-- Rust owns public API and durable operations.
-- Python owns private cognition and learning.
-- PostgreSQL owns operational state.
-- Qdrant owns vector memory.
-- Customer applications execute customer actions.
+Current integrations are listed in `THIRD_PARTY_LICENSES.md`.
 
-An upstream license file does not prove that a package
-is installed or integrated.
-
-Integration acceptance requires executable code,
-real runtime invocation and verified tests.
+Additional components are added here when they become part of the
+running KIYT architecture.
