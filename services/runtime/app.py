@@ -13,6 +13,10 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from cognitive_graph import build_graph
+from policy_selector import (
+    KIYTPolicyError,
+    KIYTPolicySelector,
+)
 from meta_reasoner import (
     MetaProviderError,
     MetaReasoner,
@@ -20,6 +24,10 @@ from meta_reasoner import (
 from memory_adapter import (
     KIYTMemoryAdapter,
     KIYTMemoryError,
+)
+from evaluation_adapter import (
+    KIYTEvaluationAdapter,
+    KIYTEvaluationError,
 )
 
 
@@ -55,6 +63,11 @@ class CognitionRequest(BaseModel):
     )
 
 
+    policy_state: dict[str, Any] = Field(
+        default_factory=dict,
+    )
+
+
 class EpisodeWriteRequest(BaseModel):
     workspace_id: str = Field(
         min_length=1,
@@ -84,6 +97,49 @@ class EpisodeWriteRequest(BaseModel):
     decision: dict[str, Any]
 
     result: dict[str, Any]
+
+
+class EvaluationRequest(BaseModel):
+    workspace_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    run_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    decision_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    observation_id: str = Field(
+        min_length=1,
+        max_length=128,
+    )
+
+    objective: str = Field(
+        min_length=1,
+        max_length=20000,
+    )
+
+    decision: dict[str, Any]
+
+    observation: dict[str, Any]
+
+    available_actions: list[
+        dict[str, Any]
+    ] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+
+    feedback: (
+        dict[str, Any]
+        | None
+    ) = None
 
 
 class SemanticWriteRequest(BaseModel):
@@ -172,11 +228,18 @@ async def lifespan(
 ):
     reasoner = MetaReasoner()
     memory = KIYTMemoryAdapter.from_env()
+    evaluation = (
+        KIYTEvaluationAdapter.from_env()
+    )
+
+    policy = KIYTPolicySelector()
 
     await memory.ensure_ready()
 
     app.state.reasoner = reasoner
     app.state.memory = memory
+    app.state.evaluation = evaluation
+    app.state.policy = policy
 
     try:
         yield
@@ -369,6 +432,74 @@ async def write_episode(
     }
 
 
+@app.post("/evaluation/evaluate")
+async def evaluate_decision(
+    payload: EvaluationRequest,
+    request: Request,
+    x_kiyt_internal_token: str | None = Header(
+        default=None
+    ),
+) -> dict[str, Any]:
+    require_internal_token(
+        x_kiyt_internal_token
+    )
+
+    try:
+        evaluation = await (
+            request.app.state.evaluation
+            .evaluate(
+                {
+                    "objective":
+                        payload.objective.strip(),
+
+                    "decision":
+                        payload.decision,
+
+                    "observation":
+                        payload.observation,
+
+                    "available_actions":
+                        payload.available_actions,
+
+                    "feedback":
+                        payload.feedback,
+                }
+            )
+        )
+
+    except KIYTEvaluationError as exc:
+        raise HTTPException(
+            status_code=(
+                503
+                if exc.retryable
+                else 422
+            ),
+            detail={
+                "code":
+                    exc.code,
+                "retryable":
+                    exc.retryable,
+            },
+        ) from exc
+
+    return {
+        "workspace_id":
+            payload.workspace_id,
+
+        "run_id":
+            payload.run_id,
+
+        "decision_id":
+            payload.decision_id,
+
+        "observation_id":
+            payload.observation_id,
+
+        "evaluation":
+            evaluation,
+    }
+
+
 @app.post("/cognition/decide")
 async def cognition_decide(
     payload: CognitionRequest,
@@ -418,6 +549,51 @@ async def cognition_decide(
             },
         ) from exc
 
+    try:
+        policy_selection = (
+            request.app.state.policy.select(
+                objective=objective,
+                context=payload.context,
+                available_actions=(
+                    payload.available_actions
+                ),
+                policy_state=(
+                    payload.policy_state
+                ),
+            )
+        )
+
+    except KIYTPolicyError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": exc.code,
+                "retryable": False,
+            },
+        ) from exc
+
+    strategy = policy_selection[
+        "strategy"
+    ]
+
+    (
+        episodic_limit,
+        semantic_limit,
+    ) = (
+        request.app.state.policy
+        .recall_limits(strategy)
+    )
+
+    strategy_instruction = (
+        request.app.state.policy
+        .instruction(strategy)
+    )
+
+    captured["policy"] = (
+        policy_selection
+    )
+
+
     async def live_recaller(
         state: dict[str, Any],
     ) -> dict[str, Any]:
@@ -448,7 +624,7 @@ async def cognition_decide(
                     "workspace_id"
                 ],
                 query=recall_query,
-                limit=5,
+                limit=episodic_limit,
             )
         )
 
@@ -458,7 +634,7 @@ async def cognition_decide(
                     "workspace_id"
                 ],
                 query=recall_query,
-                limit=5,
+                limit=semantic_limit,
             )
         )
 
@@ -482,6 +658,16 @@ async def cognition_decide(
         reasoning_context = dict(
             state.get("context") or {}
         )
+
+        reasoning_context[
+            "_kiyt_internal_cognitive_strategy"
+        ] = {
+            "strategy": strategy,
+            "instruction":
+                strategy_instruction,
+            "source":
+                "kiyt-policy-v1",
+        }
 
         recalled = (
             state.get("memory") or {}
@@ -605,6 +791,8 @@ async def cognition_decide(
 
     return {
         "decision": decision,
+        "policy_selection":
+            captured["policy"],
         "provider": {
             "name": "meta",
             "model": (

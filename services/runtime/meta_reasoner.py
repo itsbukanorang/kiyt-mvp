@@ -693,30 +693,51 @@ class MetaReasoner:
             }
         )
 
-        response = await self._post(
-            payload
-        )
+        last_json_error: (
+            json.JSONDecodeError | None
+        ) = None
 
-        try:
-            result = json.loads(
-                _output_text(response)
+        for attempt in range(2):
+            response = await self._post(
+                payload
             )
 
-        except json.JSONDecodeError as exc:
-            raise MetaProviderError(
-                "meta_invalid_effort_json",
-                retryable=False,
-            ) from exc
+            try:
+                result = json.loads(
+                    _output_text(response)
+                )
 
-        effort = result.get("effort")
+            except json.JSONDecodeError as exc:
+                last_json_error = exc
 
-        if effort not in MAIN_EFFORTS:
+                if attempt == 0:
+                    continue
+
+                raise MetaProviderError(
+                    "meta_invalid_effort_json",
+                    retryable=True,
+                ) from exc
+
+            effort = result.get("effort")
+
+            if effort in MAIN_EFFORTS:
+                return (
+                    effort,
+                    _usage(response),
+                )
+
+            if attempt == 0:
+                continue
+
             raise MetaProviderError(
                 "meta_invalid_effort",
-                retryable=False,
+                retryable=True,
             )
 
-        return effort, _usage(response)
+        raise MetaProviderError(
+            "meta_invalid_effort_json",
+            retryable=True,
+        ) from last_json_error
 
     async def reason(
         self,
