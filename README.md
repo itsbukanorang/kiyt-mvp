@@ -82,10 +82,10 @@ Production deployment configuration, host paths, credentials, private environmen
 | 08 Playground integration | PASS |
 | 09 Runs + usage + billing | PASS |
 | 10 API documentation | PASS |
-| 11 Release verification | NEXT |
+| 11 Release verification | PASS |
 | 12 Global KIYT learning | NOT_STARTED |
 
-**Current position: Modules 00–10 PASS — 11 completed milestones. Module 11 final release verification is next. Module 12 remains an extended global-learning milestone after the MVP service release gate.**
+**Current position: Modules 00–11 PASS — 12 completed milestones. The MVP service release gate is complete. Module 12 remains the next extended global-learning milestone.**
 
 Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
 
@@ -99,9 +99,11 @@ Module 09 is production complete. The console now exposes real run history, cust
 
 Module 10 is production complete. Public developer documentation is live at **https://console.kiyt.io/docs** with 17 documentation routes, OpenAPI 3.1, copyable examples for **cURL, Python, Rust and TypeScript**, and four downloadable end-to-end quickstarts. The documentation also includes a deterministic browser-local **Run test** sandbox that requires no API key, sends no request to KIYT, invokes no model and consumes **0 Activity Tokens**. Production acceptance verified all documentation routes, downloadable examples, OpenAPI assets and existing console login behavior.
 
+Module 11 is production complete. Final release verification hardened the public run serializer to an explicit customer-safe decision allowlist and verified the change against a real production lifecycle. Acceptance covered workspace isolation, authentication negatives, observation and feedback idempotency, ALK evaluation, deterministic reward, MABWiser LinUCB learning, Activity Token accounting, working/episodic/semantic memory regression, gateway restart recovery, OpenAPI/docs and console route regression, plus final secret/log checks. Temporary acceptance credentials were removed while durable release evidence was retained.
+
 Module 12 extends KIYT with global learning from eligible, permissioned and abstracted usage. Candidate improvements are evaluated against held-out tests and require an explicit release decision before activation. Raw private customer memory, secrets, identifiers and proprietary content are excluded from shared learning data.
 
-Current execution priority: `11 → 12`.
+Current execution priority: `12`.
 
 ## Public Cognitive API Direction
 

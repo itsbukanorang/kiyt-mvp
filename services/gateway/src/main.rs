@@ -782,6 +782,294 @@ fn public_run_status(
     }
 }
 
+fn public_decision_json(
+    run_id: &str,
+    decision_id: Option<&str>,
+    decision_text: Option<&str>,
+) -> Option<Value> {
+    // Customer-facing decision contract is an explicit
+    // allowlist. Persisted/provider metadata is never
+    // forwarded implicitly.
+    let raw =
+        serde_json::from_str::<Value>(
+            decision_text?
+        )
+        .ok()?;
+
+    let object = raw.as_object()?;
+    let decision_id = decision_id?;
+
+    let status =
+        object
+            .get("status")?
+            .as_str()?;
+
+    let reason_summary =
+        object
+            .get("reason_summary")?
+            .as_str()?;
+
+    let action =
+        match status {
+            "requires_action" => {
+                let raw_action =
+                    object
+                        .get("action")?
+                        .as_object()?;
+
+                let name =
+                    raw_action
+                        .get("name")?
+                        .as_str()?;
+
+                let arguments =
+                    raw_action
+                        .get("arguments")?
+                        .as_object()?;
+
+                json!({
+                    "name": name,
+                    "arguments": arguments,
+                })
+            }
+
+            "needs_input" | "completed" =>
+                Value::Null,
+
+            _ => return None,
+        };
+
+    Some(json!({
+        "status": status,
+        "action": action,
+        "reason_summary": reason_summary,
+        "run_id": run_id,
+        "decision_id": decision_id,
+    }))
+}
+
+
+#[cfg(test)]
+mod public_contract_tests {
+    use super::*;
+
+    fn sorted_keys(
+        value: &Value,
+    ) -> Vec<String> {
+        let mut keys =
+            value
+                .as_object()
+                .expect("object")
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn requires_action_strips_internal_metadata() {
+        let raw = json!({
+            "status": "requires_action",
+            "action": {
+                "name": "send_email",
+                "arguments": {
+                    "to": "customer@example.test",
+                    "provider": "customer-owned-value"
+                },
+                "internal_tool_id": "secret-tool"
+            },
+            "reason_summary": "Send the approved message.",
+            "provider": "internal-provider",
+            "model": "internal-model",
+            "reasoning_effort": "high",
+            "response_id": "internal-response",
+            "evaluation": {
+                "score": 1.0,
+                "artifact": "private"
+            },
+            "usage": {
+                "input_tokens": 999
+            },
+            "policy_evidence": {
+                "arm": "private"
+            },
+            "chain_of_thought": "must never escape"
+        })
+        .to_string();
+
+        let public =
+            public_decision_json(
+                "run_test",
+                Some("dec_test"),
+                Some(&raw),
+            )
+            .expect("public decision");
+
+        assert_eq!(
+            sorted_keys(&public),
+            vec![
+                "action",
+                "decision_id",
+                "reason_summary",
+                "run_id",
+                "status",
+            ]
+        );
+
+        assert_eq!(
+            sorted_keys(&public["action"]),
+            vec![
+                "arguments",
+                "name",
+            ]
+        );
+
+        // Customer action arguments are payload data and
+        // must remain intact, even when a customer chooses
+        // a key such as "provider".
+        assert_eq!(
+            public["action"]["arguments"]["provider"],
+            "customer-owned-value"
+        );
+
+        assert_eq!(
+            public["run_id"],
+            "run_test"
+        );
+
+        assert_eq!(
+            public["decision_id"],
+            "dec_test"
+        );
+
+        for forbidden in [
+            "provider",
+            "model",
+            "reasoning_effort",
+            "response_id",
+            "evaluation",
+            "usage",
+            "policy_evidence",
+            "chain_of_thought",
+        ] {
+            assert!(
+                public.get(forbidden).is_none(),
+                "leaked {forbidden}"
+            );
+        }
+
+        assert!(
+            public["action"]
+                .get("internal_tool_id")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn needs_input_is_customer_safe() {
+        let raw = json!({
+            "status": "needs_input",
+            "action": null,
+            "reason_summary": "Need customer confirmation.",
+            "provider": "private",
+            "evaluation": {
+                "artifact": "private"
+            }
+        })
+        .to_string();
+
+        let public =
+            public_decision_json(
+                "run_input",
+                Some("dec_input"),
+                Some(&raw),
+            )
+            .expect("public decision");
+
+        assert_eq!(
+            public["status"],
+            "needs_input"
+        );
+
+        assert!(public["action"].is_null());
+
+        assert_eq!(
+            sorted_keys(&public),
+            vec![
+                "action",
+                "decision_id",
+                "reason_summary",
+                "run_id",
+                "status",
+            ]
+        );
+    }
+
+    #[test]
+    fn completed_is_customer_safe() {
+        let raw = json!({
+            "status": "completed",
+            "action": null,
+            "reason_summary": "Objective completed.",
+            "model": "private-model"
+        })
+        .to_string();
+
+        let public =
+            public_decision_json(
+                "run_done",
+                Some("dec_done"),
+                Some(&raw),
+            )
+            .expect("public decision");
+
+        assert_eq!(
+            public["status"],
+            "completed"
+        );
+
+        assert!(public["action"].is_null());
+
+        assert!(
+            public.get("model").is_none()
+        );
+    }
+
+    #[test]
+    fn invalid_decision_is_not_forwarded() {
+        for raw in [
+            json!({
+                "status": "unknown",
+                "action": null,
+                "reason_summary": "bad"
+            }),
+            json!({
+                "status": "requires_action",
+                "action": {
+                    "name": "x"
+                },
+                "reason_summary": "missing arguments"
+            }),
+            json!({
+                "status": "completed",
+                "action": null
+            }),
+        ] {
+            assert!(
+                public_decision_json(
+                    "run_invalid",
+                    Some("dec_invalid"),
+                    Some(&raw.to_string()),
+                )
+                .is_none()
+            );
+        }
+    }
+}
+
+
 async fn load_run_json(
     db: &PgPool,
     workspace_id: &str,
@@ -799,22 +1087,14 @@ async fn load_run_json(
             r.completed_at::text AS completed_at,
 
             d.id AS decision_id,
-            d.decision_json::text AS decision_json,
-            d.provider_name,
-            d.model,
-            d.reasoning_effort,
-            d.provider_response_id
+            d.decision_json::text AS decision_json
 
         FROM runs r
 
         LEFT JOIN LATERAL (
             SELECT
                 d0.id,
-                d0.decision_json,
-                d0.provider_name,
-                d0.model,
-                d0.reasoning_effort,
-                d0.provider_response_id
+                d0.decision_json
             FROM decisions d0
             WHERE d0.run_id = r.id
               AND d0.workspace_id = r.workspace_id
@@ -862,330 +1142,18 @@ async fn load_run_json(
     let decision_text: Option<String> =
         row.try_get("decision_json")?;
 
-    let provider_name: Option<String> =
-        row.try_get("provider_name")?;
-
-    let model: Option<String> =
-        row.try_get("model")?;
-
-    let reasoning_effort: Option<String> =
-        row.try_get("reasoning_effort")?;
-
-    let provider_response_id: Option<String> =
-        row.try_get("provider_response_id")?;
-
-    let mut decision =
-        decision_text.and_then(|text| {
-            serde_json::from_str::<Value>(
-                &text
-            )
-            .ok()
-        });
-
-    if let (
-        Some(Value::Object(object)),
-        Some(decision_id),
-    ) = (
-        &mut decision,
-        decision_id.as_ref(),
-    ) {
-        object.insert(
-            "run_id".to_owned(),
-            Value::String(id.clone()),
+    let decision =
+        public_decision_json(
+            &id,
+            decision_id.as_deref(),
+            decision_text.as_deref(),
         );
-
-        object.insert(
-            "decision_id".to_owned(),
-            Value::String(
-                decision_id.clone()
-            ),
-        );
-    }
-
-    let usage_rows = sqlx::query(
-        r#"
-        SELECT
-            phase,
-            input_tokens,
-            cached_input_tokens,
-            output_tokens,
-            reasoning_tokens,
-            total_tokens
-
-        FROM usage_events
-
-        WHERE run_id = $1
-          AND workspace_id = $2
-          AND decision_id = (
-              SELECT id
-              FROM decisions
-              WHERE run_id = $1
-                AND workspace_id = $2
-              ORDER BY sequence DESC
-              LIMIT 1
-          )
-
-        ORDER BY phase
-        "#,
-    )
-    .bind(run_id)
-    .bind(workspace_id)
-    .fetch_all(db)
-    .await?;
-
-    let mut usage =
-        serde_json::Map::new();
-
-    for usage_row in usage_rows {
-        let phase: String =
-            usage_row.try_get("phase")?;
-
-        let input_tokens: i64 =
-            usage_row.try_get("input_tokens")?;
-
-        let cached_input_tokens: i64 =
-            usage_row.try_get(
-                "cached_input_tokens"
-            )?;
-
-        let output_tokens: i64 =
-            usage_row.try_get("output_tokens")?;
-
-        let reasoning_tokens: i64 =
-            usage_row.try_get(
-                "reasoning_tokens"
-            )?;
-
-        let total_tokens: i64 =
-            usage_row.try_get("total_tokens")?;
-
-        usage.insert(
-            phase,
-            json!({
-                "input_tokens":
-                    input_tokens,
-                "cached_input_tokens":
-                    cached_input_tokens,
-                "output_tokens":
-                    output_tokens,
-                "reasoning_tokens":
-                    reasoning_tokens,
-                "total_tokens":
-                    total_tokens,
-            }),
-        );
-    }
-
-    let provider =
-        if decision.is_some() {
-            json!({
-                "name": provider_name,
-                "model": model,
-                "reasoning_effort":
-                    reasoning_effort,
-                "response_id":
-                    provider_response_id,
-                "usage":
-                    Value::Object(usage),
-            })
-        } else {
-            Value::Null
-        };
-
-    let evaluation_row =
-        sqlx::query(
-            r#"
-            SELECT
-                id,
-                decision_id,
-                observation_id,
-                feedback_event_id,
-                evaluator_name,
-                evaluator_version,
-                rubric_name,
-                rubric_version,
-                evidence_class,
-                evidence_hash,
-                score,
-                passed,
-                components_json::text
-                    AS components_json,
-                artifact_json::text
-                    AS artifact_json,
-                artifact_hash,
-                created_at::text
-                    AS created_at
-
-            FROM evaluation_events
-
-            WHERE run_id = $1
-              AND workspace_id = $2
-
-            ORDER BY
-                created_at DESC,
-                id DESC
-
-            LIMIT 1
-            "#,
-        )
-        .bind(run_id)
-        .bind(workspace_id)
-        .fetch_optional(db)
-        .await?;
-
-    let evaluation =
-        if let Some(row) =
-            evaluation_row
-        {
-            let components_text:
-                String =
-                row.try_get(
-                    "components_json"
-                )?;
-
-            let artifact_text:
-                String =
-                row.try_get(
-                    "artifact_json"
-                )?;
-
-            json!({
-                "id":
-                    row.try_get::<
-                        String,
-                        _
-                    >("id")?,
-
-                "decision_id":
-                    row.try_get::<
-                        String,
-                        _
-                    >("decision_id")?,
-
-                "observation_id":
-                    row.try_get::<
-                        String,
-                        _
-                    >("observation_id")?,
-
-                "feedback_event_id":
-                    row.try_get::<
-                        Option<String>,
-                        _
-                    >(
-                        "feedback_event_id"
-                    )?,
-
-                "evaluator": {
-                    "name":
-                        row.try_get::<
-                            String,
-                            _
-                        >(
-                            "evaluator_name"
-                        )?,
-
-                    "version":
-                        row.try_get::<
-                            String,
-                            _
-                        >(
-                            "evaluator_version"
-                        )?,
-                },
-
-                "rubric": {
-                    "name":
-                        row.try_get::<
-                            String,
-                            _
-                        >(
-                            "rubric_name"
-                        )?,
-
-                    "version":
-                        row.try_get::<
-                            String,
-                            _
-                        >(
-                            "rubric_version"
-                        )?,
-                },
-
-                "evidence_class":
-                    row.try_get::<
-                        String,
-                        _
-                    >(
-                        "evidence_class"
-                    )?,
-
-                "evidence_hash":
-                    row.try_get::<
-                        String,
-                        _
-                    >(
-                        "evidence_hash"
-                    )?,
-
-                "score":
-                    row.try_get::<
-                        f64,
-                        _
-                    >("score")?,
-
-                "passed":
-                    row.try_get::<
-                        bool,
-                        _
-                    >("passed")?,
-
-                "components":
-                    serde_json::from_str::<
-                        Value
-                    >(
-                        &components_text
-                    )
-                    .unwrap_or(
-                        Value::Null
-                    ),
-
-                "artifact":
-                    serde_json::from_str::<
-                        Value
-                    >(
-                        &artifact_text
-                    )
-                    .unwrap_or(
-                        Value::Null
-                    ),
-
-                "artifact_hash":
-                    row.try_get::<
-                        String,
-                        _
-                    >(
-                        "artifact_hash"
-                    )?,
-
-                "created_at":
-                    row.try_get::<
-                        String,
-                        _
-                    >("created_at")?,
-            })
-        }
-        else {
-            Value::Null
-        };
 
     Ok(Some(json!({
         "id": id,
         "status":
             public_run_status(&status),
         "decision": decision,
-        "provider": provider,
-        "evaluation": evaluation,
 
         "error":
             if error_code.is_some() {

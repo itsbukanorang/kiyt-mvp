@@ -1,6 +1,6 @@
 # KIYT MVP — Build Status
 
-Updated: 4 November 2026 (UTC+7)
+Updated: 5 November 2026 (UTC+7)
 
 ## Current Position
 
@@ -17,10 +17,10 @@ Updated: 4 November 2026 (UTC+7)
 | 08 Playground integration | PASS | Real Playground run creation, polling, structured decisions, observation continuation, durable `needs_input` continuation, reload resume and production browser E2E verified |
 | 09 Runs + usage + billing | PASS | Real run history, usage accounting, Activity Tokens, customer billing views, provider-attempt ledger and production reconciliation verified |
 | 10 API documentation | PASS | Public docs live; 17/17 routes, OpenAPI 3.1, cURL/Python/Rust/TypeScript examples, downloadable quickstarts and deterministic local 0-AT sandbox verified in production |
-| 11 Release verification | NEXT | Final production release gate after Modules 05–10 |
+| 11 Release verification | PASS | Production release boundary, real lifecycle, idempotency, isolation, ALK/reward/LinUCB, memory, Activity Tokens, restart recovery, docs/console regression and security gates verified |
 | 12 Global KIYT learning | NOT_STARTED | Permissioned, abstracted global learning pipeline with holdout evaluation and manual activation |
 
-**Modules 00–10 PASS (11 completed milestones). Module 11 final release verification is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
+**Modules 00–11 PASS (12 completed milestones). The KIYT MVP service release gate is complete. Module 12 is the next extended global-learning milestone and is verified separately.**
 
 ## Module 04 Evidence
 
@@ -63,9 +63,9 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 ## Current build position
 
-- Modules 00–10: PASS.
+- Modules 00–11: PASS.
 - Module 06 — Three memories: PASS (60/60 production hard tests).
-- Completed milestones: Modules 00–10 PASS (11 milestones).
+- Completed milestones: Modules 00–11 PASS (12 milestones).
 - Pre-Module 08 API contract hardening: PASS at `main@75d75de6aff6e8a9aa67d5d8fbe780933d591339`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
@@ -100,7 +100,7 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Deployment-only configuration remains outside the public repository.
 - Runtime secrets remain outside Git.
 
-Current project next milestone: Module 11 — Final release verification.
+Current project next milestone: Module 12 — Global KIYT learning.
 
 
 ## Module 06 production completion
@@ -122,7 +122,7 @@ Module 06 completed production acceptance on 4 November 2026 (UTC+7).
 - Production health and logs: PASS.
 - Test fixtures cleaned: PASS.
 
-Execution order after Module 10: `11 → 12`.
+Execution order after Module 11: `12`.
 
 ## Module 07 production completion
 
@@ -250,6 +250,91 @@ console/reporting paths that legitimately require them.
 
 Module 10 documentation itself is PASS. This serializer cleanup is a Module 11
 release-boundary requirement.
+
+Module 11 resolved this release-boundary item. The public run serializer now
+uses an explicit customer-safe decision allowlist and no longer attaches
+provider metadata, provider usage, evaluation artifacts or other internal
+reasoning evidence to the public run response.
+
+## Module 11 production release verification
+
+Module 11 completed production acceptance on 5 November 2026 (UTC+7).
+
+Release boundary under verification:
+
+- Parent repository HEAD before the Module 11 source change:
+  `595023971ffbd53fed71773308edff7c06d35f45`.
+- Verified gateway source SHA256:
+  `5b31f0ee20a1b6721a79aab7576c2a021027a5d953178b3287f4086656a47b94`.
+- Production candidate image:
+  `kiyt-gateway:m11-public-boundary-rc1`.
+- Production image ID:
+  `sha256:ce75cc6de7d71ebc2739b80d9d701e57a55013b0ae4a4f7134f5030927b4c4dc`.
+
+Release acceptance:
+
+- Public run/decision serializer uses an explicit allowlist.
+- Public decision fields are limited to `status`, `action`,
+  `reason_summary`, `run_id` and `decision_id`.
+- Customer-owned `action.arguments` are preserved verbatim while internal
+  decision/provider metadata is stripped.
+- Provider name/model/reasoning metadata, provider response IDs, raw provider
+  usage and evaluation artifacts are not returned by the public run serializer.
+- Public-boundary production fixture: PASS.
+- Owner-workspace access: HTTP 200.
+- Cross-workspace access: HTTP 404.
+- Missing/invalid authentication: HTTP 401.
+- Internal metadata exposure canary count: 0.
+- Real lifecycle trajectory:
+  `requires_action → successful observation → completed`.
+- Observation create: HTTP 202.
+- Observation idempotent replay: PASS.
+- Same idempotency key with different observation payload: HTTP 409.
+- Durable continuation singleton: PASS.
+- Continuation operations: 2.
+- Persisted decisions: 2.
+- Usage ledger events on the acceptance trajectory: 4.
+- Provider-attempt ledger events on the acceptance trajectory: 4.
+- ALK evaluation:
+  `future-agi-agent-learning-kit` `0.3.5`, score `0.8833`, PASS.
+- Deterministic KIYT reward: `0.8833`, eligible observed success.
+- Policy evidence ledger: PASS.
+- MABWiser LinUCB `2.7.4` online update: applied.
+- Cognitive strategy selected for the accepted reward: `direct`.
+- Policy snapshot after the acceptance update:
+  revision `1`, update count `1`.
+- Feedback create/replay/idempotency-conflict contract: PASS.
+- Gateway-only restart recovery: PASS.
+- Run, API authentication, idempotency, feedback, reward and policy state
+  remained durable after restart.
+- Real production Working Memory read: PASS.
+- Real production Episodic Memory success recall: PASS.
+- Semantic Memory scoped read path: PASS.
+- LangGraph positive and negative contract regression: PASS.
+- Evaluation-adapter regression: PASS.
+- Acceptance trajectory Activity Tokens:
+  `11.8530000000000000` AT.
+- Decision Activity Token accounting: PASS.
+- Public documentation route: HTTP 200.
+- OpenAPI 3.1 server prefix and all five core public API paths/methods: PASS.
+- Playground, Runs, Billing and API Keys route resolution: PASS.
+- Public serializer source unit tests: 4/4 PASS.
+- Final secret/log audit:
+  temporary API-key hits `0`, sensitive environment-value log hits `0`,
+  Authorization header log hits `0`, hidden-reasoning marker hits `0`.
+- Temporary Module 11 API credential removed after acceptance.
+- Root-only temporary acceptance state removed after acceptance.
+- Release run, observation, evaluation, reward, feedback and policy-learning
+  evidence retained.
+- Final public health: PASS.
+- Module 11 required no database reset, volume reset or proxy redesign.
+
+Historical provider failure/recovery acceptance from the already-PASS durable
+runtime remains applicable because Module 11 changes only the customer-facing
+run serialization boundary; provider execution/retry behavior was not modified.
+
+Module 12 remains a separate post-MVP learning milestone and does not change
+this Module 11 service-release PASS result.
 
 ## Module 12 — Global KIYT Learning
 
