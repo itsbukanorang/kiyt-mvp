@@ -47,6 +47,8 @@ open-source foundations:
 - **Mem0** — memory extraction and deduplication
 - **FastEmbed** — local embedding runtime
 - **Qdrant** — vector memory layer
+- **Future AGI Agent Learning Kit (ALK)** — versioned outcome evaluation
+- **MABWiser** — workspace-scoped LinUCB cognitive-strategy learning
 
 KIYT-specific orchestration, lifecycle, tenancy, memory policy and decision
 logic remain part of the KIYT implementation.
@@ -76,24 +78,26 @@ Production deployment configuration, host paths, credentials, private environmen
 | 04 Workspace + members + API keys | PASS |
 | 05 First cognitive decision | PASS |
 | 06 Three memories | PASS |
-| 07 Evaluation + online RL | NOT_STARTED |
+| 07 Evaluation + online RL | PASS |
 | 08 Playground integration | PASS |
 | 09 Runs + usage + billing | NOT_STARTED |
 | 10 API documentation | NOT_STARTED |
 | 11 Release verification | NOT_STARTED |
 | 12 Global KIYT learning | NOT_STARTED |
 
-**Current position: Modules 00–06 and 08 PASS — 8 completed milestones. Module 07 is next. Module 11 remains the MVP service release gate; Module 12 is an extended global-learning milestone.**
+**Current position: Modules 00–08 PASS — 9 completed milestones. Module 09 is next. Module 11 remains the MVP service release gate; Module 12 is an extended global-learning milestone.**
 
 Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
 
 Module 06 is production complete with 60/60 hard tests passing across Working, Episodic and Semantic Memory. Semantic trust is ordered as `candidate < customer_provided < verified`, and recalled memory is treated as untrusted evidence rather than instructions.
 
+Module 07 is production complete. Observed action results flow through Future AGI ALK evaluation, KIYT's deterministic reward mapper, an immutable policy-evidence ledger, and workspace-scoped MABWiser LinUCB learning. Production acceptance verified eligible positive/negative rewards, exactly-once policy updates, durable PostgreSQL policy state, restart reconstruction, workspace isolation, tenant isolation, and a changed next cognitive strategy after learning.
+
 Module 08 is production complete. The Playground now creates real cognitive runs, polls durable state, renders structured decisions, reports action observations, resumes persisted runs after reload, and continues `needs_input` decisions through durable `/inputs` continuation on the same run.
 
 Module 12 extends KIYT with global learning from eligible, permissioned and abstracted usage. Candidate improvements are evaluated against held-out tests and require an explicit release decision before activation. Raw private customer memory, secrets, identifiers and proprietary content are excluded from shared learning data.
 
-Current execution priority: `07 → 09 → 10 → 11 → 12`.
+Current execution priority: `09 → 10 → 11 → 12`.
 
 ## Public Cognitive API Direction
 

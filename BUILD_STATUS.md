@@ -13,14 +13,14 @@ Updated: 4 November 2026 (UTC+7)
 | 04 Workspace + members + API key | PASS | Multi-workspace, invites/roles, API-key console and Rust Bearer auth |
 | 05 First cognitive decision | PASS | Production 10/10 public decision acceptance with real Muse Spark 1.3; durable PostgreSQL run/operation/decision/usage ledger; auth, isolation, idempotency and recovery verified |
 | 06 Three memories | PASS | Working, episodic and semantic memory production acceptance 60/60 PASS |
-| 07 Evaluation + online RL | NOT_STARTED | Evaluation, reward and policy learner not implemented yet |
+| 07 Evaluation + online RL | PASS | ALK evaluation, deterministic KIYT reward mapping, immutable policy evidence, workspace-scoped MABWiser LinUCB learning and final production policy E2E verified |
 | 08 Playground integration | PASS | Real Playground run creation, polling, structured decisions, observation continuation, durable `needs_input` continuation, reload resume and production browser E2E verified |
 | 09 Runs + usage + billing | NOT_STARTED | Real run / usage data path pending |
 | 10 API documentation | NOT_STARTED | External quickstart pending |
 | 11 Release verification | NOT_STARTED | Final production release gate after Modules 05–10 |
 | 12 Global KIYT learning | NOT_STARTED | Permissioned, abstracted global learning pipeline with holdout evaluation and manual activation |
 
-**Modules 00–06 and 08 PASS (8 completed milestones). Module 07 is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
+**Modules 00–08 PASS (9 completed milestones). Module 09 is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
 
 ## Module 04 Evidence
 
@@ -63,9 +63,9 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 ## Current build position
 
-- Modules 00–06 and 08: PASS.
+- Modules 00–08: PASS.
 - Module 06 — Three memories: PASS (60/60 production hard tests).
-- Completed milestones: Modules 00–06 plus Module 08 PASS (8 milestones).
+- Completed milestones: Modules 00–08 PASS (9 milestones).
 - Pre-Module 08 API contract hardening: PASS at `main@75d75de6aff6e8a9aa67d5d8fbe780933d591339`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
@@ -100,7 +100,7 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Deployment-only configuration remains outside the public repository.
 - Runtime secrets remain outside Git.
 
-Next milestone: Module 07 — Evaluation + online RL.
+Current project next milestone: Module 09 — Runs + usage + billing.
 
 
 ## Module 06 production completion
@@ -122,7 +122,35 @@ Module 06 completed production acceptance on 4 November 2026 (UTC+7).
 - Production health and logs: PASS.
 - Test fixtures cleaned: PASS.
 
-Execution order after Module 08: `07 → 09 → 10 → 11 → 12`.
+Execution order after Module 07: `09 → 10 → 11 → 12`.
+
+## Module 07 production completion
+
+Module 07 completed production acceptance on 4 November 2026 (UTC+7).
+
+- Release commit: `c20efa87a8adb4b64d6c68324b2602dfb053981d`.
+- Future AGI Agent Learning Kit: `agent-learning-kit==0.3.5`.
+- ALK evaluator license verified from the exact release source as Apache-2.0; upstream `LICENSE` and `NOTICE` retained under `thirdparty/LICENSES/`.
+- MABWiser: `2.7.4`, Apache-2.0, LinUCB with `n_jobs=1`.
+- Migration `009_evaluation_foundation.sql`: PASS.
+- Migration `010_reward_mapping.sql`: PASS.
+- Migration `011_policy_evidence_ledger.sql`: PASS.
+- Migration `012_online_policy_learning.sql`: PASS.
+- Real ALK hard test: 10/10 PASS across positive and negative outcomes.
+- Deterministic reward mapping: PASS.
+- Subjective feedback has no direct reward effect.
+- Immutable policy evidence ledger: PASS.
+- Four cognitive strategy arms: `direct`, `retrieve_first`, `decompose_verify`, `cautious_verify`.
+- Real online policy-learning cold start: 4/4 PASS.
+- LinUCB changed the next selected strategy after eligible rewards: PASS.
+- Final Module 07 policy E2E: 4/4 full real evidence chain PASS.
+- Exactly-once evaluation/reward/evidence/policy update: PASS.
+- PostgreSQL durable policy state: PASS.
+- Restart policy reconstruction: PASS.
+- Workspace policy isolation: PASS.
+- Tenant isolation: PASS.
+- Acceptance fixtures cleaned: PASS.
+- Customer actions remain customer-executed; KIYT receives execution results as observations and remains the cognitive decision layer.
 
 ## Module 08 production completion
 
@@ -146,7 +174,7 @@ Module 08 completed production acceptance on 4 November 2026 (UTC+7).
 - Browser E2E `INPUT NEEDED → Continue run → reasoning → next decision`: PASS.
 - Production secrets and deployment-only configuration remain outside Git.
 
-Current next milestone: Module 07 — Evaluation + online RL.
+Current next milestone: Module 09 — Runs + usage + billing.
 
 ## Module 12 — Global KIYT Learning
 
