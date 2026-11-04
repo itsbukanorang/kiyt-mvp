@@ -1,6 +1,6 @@
 /* Update this file to connect the interface to your existing KIYT services. */
 window.KIYT_CONSOLE_CONFIG = Object.freeze({
-  documentationUrl: '',
+  documentationUrl: '/docs',
   salesUrl: 'mailto:connect@kiyt.io?subject=KIYT%20Console%20%E2%80%94%20Sales%20enquiry',
   // Your server must start OAuth and own state, nonce, PKCE, and session creation.
   googleSignInUrl: '',
