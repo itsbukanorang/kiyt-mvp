@@ -1,0 +1,542 @@
+openapi: 3.1.0
+info:
+  title: KIYT Cognitive API
+  version: "1.0"
+  description: |
+    Public HTTPS/JSON contract for creating cognitive runs, polling decisions,
+    continuing runs with observations or missing input, and submitting feedback.
+servers:
+  - url: https://console.kiyt.io/api/v1
+security:
+  - bearerAuth: []
+
+paths:
+  /runs:
+    post:
+      operationId: createRun
+      summary: Create a run
+      description: Persist asynchronous cognitive work and return an accepted run identifier.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRunRequest"
+      responses:
+        "202":
+          description: Run accepted and queued/running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedRunMutation"
+        "200":
+          description: Idempotent replay after the original run moved beyond pending work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedRunMutation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /runs/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: retrieveRun
+      summary: Retrieve a run
+      responses:
+        "200":
+          description: Current persisted run state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run]
+                properties:
+                  run:
+                    $ref: "#/components/schemas/Run"
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /runs/{run_id}/observations:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      operationId: submitObservation
+      summary: Submit an observation
+      description: Report the customer-executed result for the active requires_action decision.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObservationRequest"
+      responses:
+        "202":
+          description: Observation accepted and continuation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservationMutationResponse"
+        "200":
+          description: Idempotent replay after the continuation moved beyond pending work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservationMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /runs/{run_id}/inputs:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      operationId: provideInput
+      summary: Provide missing input
+      description: Continue the same run from an active needs_input decision.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InputRequest"
+      responses:
+        "202":
+          description: Input accepted and continuation queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InputMutationResponse"
+        "200":
+          description: Idempotent replay after the continuation moved beyond pending work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InputMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /runs/{run_id}/feedback:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    post:
+      operationId: submitFeedback
+      summary: Submit feedback
+      description: Attach subjective customer feedback to a run.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRequest"
+      responses:
+        "201":
+          description: Feedback created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackResponse"
+        "200":
+          description: Identical idempotent feedback replay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: KIYT API key
+      description: Workspace-scoped API key with the kiyt_ prefix.
+
+  parameters:
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Durable KIYT run identifier.
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+        pattern: '^[!-~]+$'
+      description: |
+        Printable ASCII key scoped to one logical mutation. Reuse it only when
+        retrying the same normalized payload.
+
+  schemas:
+    CreateRunRequest:
+      type: object
+      required: [objective]
+      properties:
+        objective:
+          type: string
+          minLength: 1
+          description: Goal to resolve. The current gateway enforces a 20,000-byte maximum.
+        context:
+          type: object
+          default: {}
+          additionalProperties: true
+        available_actions:
+          type: array
+          maxItems: 100
+          default: []
+          items:
+            $ref: "#/components/schemas/ActionDefinition"
+      additionalProperties: true
+
+    ActionDefinition:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        input_schema:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    Decision:
+      type: object
+      required: [status, action, reason_summary, run_id, decision_id]
+      properties:
+        status:
+          type: string
+          enum: [requires_action, needs_input, completed]
+        action:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [name, arguments]
+              properties:
+                name:
+                  type: string
+                arguments:
+                  type: object
+                  additionalProperties: true
+              additionalProperties: false
+        reason_summary:
+          type: string
+          description: Concise decision explanation; not hidden chain-of-thought.
+        run_id:
+          type: string
+        decision_id:
+          type: string
+      additionalProperties: false
+
+    Run:
+      type: object
+      required: [id, status, decision, error, created_at, updated_at, completed_at]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, requires_action, needs_input, completed, failed]
+        decision:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Decision"
+        error:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/RunError"
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        completed_at:
+          type: [string, "null"]
+      description: |
+        Stable customer integration fields. Clients should ignore response
+        fields they do not recognize rather than depending on undocumented
+        service metadata.
+      additionalProperties: true
+
+    RunError:
+      type: object
+      required: [code, retryable]
+      properties:
+        code:
+          type: string
+        retryable:
+          type: [boolean, "null"]
+      additionalProperties: false
+
+    AcceptedRunMutation:
+      type: object
+      required: [run_id, operation_id, status, idempotent_replay, run]
+      properties:
+        run_id:
+          type: string
+        operation_id:
+          type: string
+        status:
+          type: string
+        idempotent_replay:
+          type: boolean
+        run:
+          $ref: "#/components/schemas/Run"
+      additionalProperties: true
+
+    ObservationRequest:
+      type: object
+      required: [decision_id, observation_id, result]
+      properties:
+        decision_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        observation_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        result:
+          type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [success, failure]
+            output: {}
+          additionalProperties: true
+      additionalProperties: true
+
+    ObservationMutationResponse:
+      type: object
+      required: [run_id, operation_id, status, idempotent_replay, observation, run]
+      properties:
+        run_id:
+          type: string
+        operation_id:
+          type: string
+        status:
+          type: string
+        idempotent_replay:
+          type: boolean
+        observation:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+            sequence:
+              type: integer
+            decision_id:
+              type: string
+            status:
+              type: string
+              enum: [success, failure]
+          additionalProperties: true
+        run:
+          $ref: "#/components/schemas/Run"
+      additionalProperties: true
+
+    InputRequest:
+      type: object
+      required: [decision_id, input_id, data]
+      properties:
+        decision_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        input_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        data:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    InputMutationResponse:
+      type: object
+      required: [run_id, operation_id, status, idempotent_replay, input, run]
+      properties:
+        run_id:
+          type: string
+        operation_id:
+          type: string
+        status:
+          type: string
+        idempotent_replay:
+          type: boolean
+        input:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+            sequence:
+              type: integer
+            decision_id:
+              type: string
+          additionalProperties: true
+        run:
+          $ref: "#/components/schemas/Run"
+      additionalProperties: true
+
+    FeedbackRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          enum: [-1, 0, 1]
+        decision_id:
+          type: [string, "null"]
+          maxLength: 128
+        comment:
+          type: [string, "null"]
+          maxLength: 5000
+      additionalProperties: true
+
+    FeedbackResponse:
+      type: object
+      required: [idempotent_replay, feedback]
+      properties:
+        idempotent_replay:
+          type: boolean
+        feedback:
+          type: object
+          required: [id, run_id, decision_id, rating]
+          properties:
+            id:
+              type: string
+            run_id:
+              type: string
+            decision_id:
+              type: [string, "null"]
+            rating:
+              type: integer
+              enum: [-1, 0, 1]
+          additionalProperties: false
+      additionalProperties: false
+
+    Error:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          type: string
+          const: error
+        reason:
+          type: string
+      additionalProperties: false
+
+  responses:
+    BadRequest:
+      description: Missing or invalid idempotency header.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Bearer authentication failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Run does not exist in the authenticated workspace or is not accessible.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Current run state, identifier, or idempotency contract conflicts with the request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: An implemented field or normalized payload size limit was exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationError:
+      description: JSON request fields failed the public validation contract.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: Required persistence/runtime service was unavailable for this operation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
