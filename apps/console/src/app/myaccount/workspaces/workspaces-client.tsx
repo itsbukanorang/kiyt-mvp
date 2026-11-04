@@ -291,7 +291,7 @@ export default function WorkspacesClient() {
         </div>
       )}
 
-      <Card>
+      <Card className="workspace-list-card">
         <div className="panel-heading">
           <div>
             <h2>
@@ -493,7 +493,7 @@ export default function WorkspacesClient() {
         )}
       </Card>
 
-      <Card className="form-panel recent-panel">
+      <Card className="form-panel workspace-create-card">
         <div className="panel-heading">
           <div>
             <h2>

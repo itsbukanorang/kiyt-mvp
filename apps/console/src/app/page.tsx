@@ -45,7 +45,7 @@ export default async function Home() {
             <span className="brand-divider" aria-hidden="true"></span><span className="brand-console">Console</span>
           </a>
           <nav className="main-nav" aria-label="Main navigation">
-            <a href="mailto:connect@kiyt.io?subject=KIYT%20Documentation" id="documentation-link">Documentation <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" /></svg></a>
+            <a href="/docs" id="documentation-link">Documentation <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" /></svg></a>
             <a href="mailto:connect@kiyt.io?subject=KIYT%20Console%20%E2%80%94%20Sales%20enquiry" className="sales-link" data-sales-link>Contact Sales <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg></a>
           </nav>
         </header>

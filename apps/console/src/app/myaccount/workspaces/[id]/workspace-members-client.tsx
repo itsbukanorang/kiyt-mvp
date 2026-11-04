@@ -274,7 +274,7 @@ export default function WorkspaceMembersClient({
         </div>
       )}
 
-      <Card>
+      <Card className="workspace-members-card">
         <div className="panel-heading">
           <div>
             <h2>Members</h2>
@@ -356,7 +356,7 @@ export default function WorkspaceMembersClient({
       </Card>
 
       {canManage && (
-        <Card className="form-panel recent-panel">
+        <Card className="form-panel workspace-invite-card">
           <div className="panel-heading">
             <div>
               <h2>Invite member</h2>
@@ -418,7 +418,7 @@ export default function WorkspaceMembersClient({
 
       {canManage &&
         invites.length > 0 && (
-          <Card className="recent-panel">
+          <Card className="workspace-invitations-card">
             <div className="panel-heading">
               <div>
                 <h2>
