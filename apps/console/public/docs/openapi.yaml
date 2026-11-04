@@ -297,6 +297,20 @@ components:
           type: string
       additionalProperties: false
 
+    RunSummary:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, requires_action, needs_input, completed, failed]
+      description: |
+        Minimal run snapshot returned by a fresh accepted mutation.
+        Retrieve the run to obtain the full persisted state.
+      additionalProperties: true
+
     Run:
       type: object
       required: [id, status, decision, error, created_at, updated_at, completed_at]
@@ -326,6 +340,14 @@ components:
         service metadata.
       additionalProperties: true
 
+    MutationRun:
+      description: |
+        Fresh accepted mutations return RunSummary. An idempotent replay may
+        return the full current Run.
+      anyOf:
+        - $ref: "#/components/schemas/RunSummary"
+        - $ref: "#/components/schemas/Run"
+
     RunError:
       type: object
       required: [code, retryable]
@@ -349,7 +371,7 @@ components:
         idempotent_replay:
           type: boolean
         run:
-          $ref: "#/components/schemas/Run"
+          $ref: "#/components/schemas/MutationRun"
       additionalProperties: true
 
     ObservationRequest:
@@ -402,7 +424,7 @@ components:
               enum: [success, failure]
           additionalProperties: true
         run:
-          $ref: "#/components/schemas/Run"
+          $ref: "#/components/schemas/MutationRun"
       additionalProperties: true
 
     InputRequest:
@@ -446,7 +468,7 @@ components:
               type: string
           additionalProperties: true
         run:
-          $ref: "#/components/schemas/Run"
+          $ref: "#/components/schemas/MutationRun"
       additionalProperties: true
 
     FeedbackRequest:

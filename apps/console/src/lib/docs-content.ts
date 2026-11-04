@@ -1066,11 +1066,11 @@ export const DOC_CONTENT: Record<string, DocContent> = {
         id: "response",
         title: "Response",
         blocks: [
-          { type: "paragraph", text: "A new valid run returns `HTTP 202 Accepted`. Poll the returned run ID; the decision is not necessarily ready yet." },
+          { type: "paragraph", text: "A new valid run returns `HTTP 202 Accepted`. The fresh response contains a compact `run` summary with `id` and `status`. Poll `GET /api/v1/runs/{id}` for the full persisted run state." },
           { type: "code", examples: [
             { label: "202 Accepted", language: "json", code: createRunResponse },
           ] },
-          { type: "paragraph", text: "Replaying the same key and normalized payload returns the same logical run with `idempotent_replay: true`. A replay is `202` while the run is still queued/running and `200` after it has moved beyond pending work." },
+          { type: "paragraph", text: "Replaying the same key and normalized payload returns the same logical run with `idempotent_replay: true`. A replay is `202` while the run is still queued/running and `200` after it has moved beyond pending work. Replay responses may contain the full current run." },
         ],
       },
       {
@@ -1170,7 +1170,7 @@ export const DOC_CONTENT: Record<string, DocContent> = {
         id: "response",
         title: "Response",
         blocks: [
-          { type: "paragraph", text: "A fresh accepted continuation returns `HTTP 202` and queues the next operation on the same run." },
+          { type: "paragraph", text: "A fresh accepted continuation returns `HTTP 202` and queues the next operation on the same run. Fresh responses contain a compact `run` summary; an idempotent replay may contain the full current run." },
           { type: "code", examples: [
             { label: "202 Accepted", language: "json", code: observationResponse },
           ] },
@@ -1224,7 +1224,7 @@ export const DOC_CONTENT: Record<string, DocContent> = {
           { type: "code", examples: [
             { label: "202 Accepted", language: "json", code: inputResponse },
           ] },
-          { type: "paragraph", text: "Poll `GET /api/v1/runs/{id}` again after the accepted continuation." },
+          { type: "paragraph", text: "Fresh accepted input responses contain a compact `run` summary; an idempotent replay may contain the full current run. Poll `GET /api/v1/runs/{id}` for full run state." },
         ],
       },
       {
