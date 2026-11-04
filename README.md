@@ -1,137 +1,28 @@
-# KIYT MVP
+# KIYT
 
-**KIYT is a hosted, model-agnostic cognitive service for reasoning, planning, and business decisions.**
+**Cognitive intelligence for your models and agents.**
 
-Customer applications and agents call KIYT over HTTPS. KIYT authenticates the workspace, reasons over the objective and context, selects from customer-provided `available_actions`, and returns a structured decision. The customer executes the action in its own environment and sends the observation back to KIYT.
+KIYT is a hosted API for reasoning, persistent memory, and adaptive decisions. Connect your existing application or agent while keeping your own models and tools.
 
-## Architecture
+[Console](https://console.kiyt.io) · [Documentation](https://console.kiyt.io/docs) · [Website](https://kiyt.io)
 
-```text
-Customer Application / Agent
-            |
-            | HTTPS + KIYT API Key
-            v
-+-----------------------------+
-| Rust Gateway                |
-| Axum + Tokio                |
-| auth / tenant / lifecycle   |
-+-------------+---------------+
-              |
-              v
-+-----------------------------+
-| Private Python Runtime      |
-| cognition / planning        |
-+-------------+---------------+
-              |
-              +----> model inference
-              |
-              +----> Qdrant memory
+## How it works
 
-PostgreSQL
-  -> identity
-  -> workspace / members
-  -> API keys
-  -> durable run state
-```
+1. Send a goal, context, and the actions your application can execute.
+2. Receive a structured decision: take an action, provide more information, or finish.
+3. Execute actions in your application and report the results to continue the same run.
 
-The member console uses **Next.js + Better Auth**. The public API boundary is **Rust**. The private cognitive engine is **Python**. PostgreSQL owns operational state and Qdrant is used for cognitive memory.
+## What you get
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+- **Decisions** — choose the next step using context and available actions.
+- **Memory** — working, episodic, and semantic memory scoped to your workspace.
+- **Learning** — adapt decision strategies using evaluated outcomes.
+- **Visibility** — saved runs, decision history, and Activity Token usage.
 
-## Core Open-Source Foundations
+## Get started
 
-KIYT builds its own cognitive service and product logic on top of selected
-open-source foundations:
+Create a workspace and API key in the [console](https://console.kiyt.io), then follow the [quickstart](https://console.kiyt.io/docs/quickstart).
 
-- **LangGraph** — cognitive graph execution
-- **Mem0** — memory extraction and deduplication
-- **FastEmbed** — local embedding runtime
-- **Qdrant** — vector memory layer
-- **Future AGI Agent Learning Kit (ALK)** — versioned outcome evaluation
-- **MABWiser** — workspace-scoped LinUCB cognitive-strategy learning
+---
 
-KIYT-specific orchestration, lifecycle, tenancy, memory policy and decision
-logic remain part of the KIYT implementation.
-
-See [`thirdparty/`](thirdparty/) for attribution and license details.
-
-## Repository
-
-```text
-apps/console/         Next.js member console
-services/gateway/     Rust public API and tenant boundary
-services/runtime/     Private Python cognitive runtime
-db/migrations/        PostgreSQL application schema
-docs/                 Product and architecture documentation
-```
-
-Production deployment configuration, host paths, credentials, private environment files, and server-only tooling are intentionally excluded from this public repository.
-
-## Current Build Status
-
-| Module | Status |
-|---|---|
-| 00 VPS foundation | PASS |
-| 01 Console + Rust/Python foundation | PASS |
-| 02 PostgreSQL + Qdrant | PASS |
-| 03 Better Auth | PASS |
-| 04 Workspace + members + API keys | PASS |
-| 05 First cognitive decision | PASS |
-| 06 Three memories | PASS |
-| 07 Evaluation + online RL | PASS |
-| 08 Playground integration | PASS |
-| 09 Runs + usage + billing | PASS |
-| 10 API documentation | PASS |
-| 11 Release verification | PASS |
-| 12 Global KIYT learning | NOT_STARTED |
-
-**Current position: Modules 00–11 PASS — 12 completed milestones. The MVP service release gate is complete. Module 12 remains the next extended global-learning milestone.**
-
-Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
-
-Module 06 is production complete with 60/60 hard tests passing across Working, Episodic and Semantic Memory. Semantic trust is ordered as `candidate < customer_provided < verified`, and recalled memory is treated as untrusted evidence rather than instructions.
-
-Module 07 is production complete. Observed action results flow through Future AGI ALK evaluation, KIYT's deterministic reward mapper, an immutable policy-evidence ledger, and workspace-scoped MABWiser LinUCB learning. Production acceptance verified eligible positive/negative rewards, exactly-once policy updates, durable PostgreSQL policy state, restart reconstruction, workspace isolation, tenant isolation, and a changed next cognitive strategy after learning.
-
-Module 08 is production complete. The Playground now creates real cognitive runs, polls durable state, renders structured decisions, reports action observations, resumes persisted runs after reload, and continues `needs_input` decisions through durable `/inputs` continuation on the same run.
-
-Module 09 is production complete. The console now exposes real run history, customer-safe run detail, Activity Token usage and billing data. Production acceptance includes the immutable 270-run benchmark, durable provider-attempt accounting, router/decision usage reconciliation, zero duplicate billing, zero cross-workspace ledger mismatch, and no guessed provider cost. Public pricing is **$5 / 1,000 AT**; the internal Activity Token calculation remains private and is intentionally excluded from this repository.
-
-Module 10 is production complete. Public developer documentation is live at **https://console.kiyt.io/docs** with 17 documentation routes, OpenAPI 3.1, copyable examples for **cURL, Python, Rust and TypeScript**, and four downloadable end-to-end quickstarts. The documentation also includes a deterministic browser-local **Run test** sandbox that requires no API key, sends no request to KIYT, invokes no model and consumes **0 Activity Tokens**. Production acceptance verified all documentation routes, downloadable examples, OpenAPI assets and existing console login behavior.
-
-Module 11 is production complete. Final release verification hardened the public run serializer to an explicit customer-safe decision allowlist and verified the change against a real production lifecycle. Acceptance covered workspace isolation, authentication negatives, observation and feedback idempotency, ALK evaluation, deterministic reward, MABWiser LinUCB learning, Activity Token accounting, working/episodic/semantic memory regression, gateway restart recovery, OpenAPI/docs and console route regression, plus final secret/log checks. Temporary acceptance credentials were removed while durable release evidence was retained.
-
-Module 12 extends KIYT with global learning from eligible, permissioned and abstracted usage. Candidate improvements are evaluated against held-out tests and require an explicit release decision before activation. Raw private customer memory, secrets, identifiers and proprietary content are excluded from shared learning data.
-
-Current execution priority: `12`.
-
-## Public Cognitive API Direction
-
-Developer documentation: **https://console.kiyt.io/docs**
-
-```text
-POST /api/v1/runs
-GET  /api/v1/runs/{id}
-POST /api/v1/runs/{id}/observations
-POST /api/v1/runs/{id}/inputs
-POST /api/v1/runs/{id}/feedback
-```
-
-Core request concepts:
-
-```text
-objective
-context
-available_actions
-limits
-```
-
-`available_actions` are owned and executed by the customer. KIYT selects and returns decisions; it does not execute customer tools or host customer agents.
-
-## Security Model
-
-- API keys are workspace-scoped and stored as hashes.
-- Rust derives tenant identity from the authenticated API key.
-- Workspace IDs supplied by callers are never treated as authorization.
-- Python, PostgreSQL, and Qdrant are private runtime components.
-- Secrets and production environment files are never committed to this repository.
+[Build status](BUILD_STATUS.md) · [Third-party notices](thirdparty/)
