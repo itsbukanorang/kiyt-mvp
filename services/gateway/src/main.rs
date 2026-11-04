@@ -3412,6 +3412,175 @@ async fn load_policy_state(
 
 
 
+async fn persist_provider_attempts(
+    state: &AppState,
+    operation: &ClaimedOperation,
+    attempts: &Value,
+) -> Result<(), sqlx::Error> {
+    let Some(items) =
+        attempts.as_array()
+    else {
+        return Ok(());
+    };
+
+    let mut tx =
+        state.db.begin().await?;
+
+    for item in items {
+        let Some(raw_ordinal) =
+            item.get("ordinal")
+                .and_then(Value::as_i64)
+                .filter(|value| *value > 0)
+        else {
+            continue;
+        };
+
+        let Ok(ordinal) =
+            i32::try_from(raw_ordinal)
+        else {
+            continue;
+        };
+
+        let phase =
+            item.get("phase")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+
+        let provider =
+            item.get("provider")
+                .and_then(Value::as_str)
+                .unwrap_or("meta");
+
+        let model =
+            item.get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+
+        let outcome =
+            item.get("outcome")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+
+        let error_code =
+            item.get("error_code")
+                .and_then(Value::as_str);
+
+        let http_status =
+            item.get("http_status")
+                .and_then(Value::as_i64)
+                .and_then(|value| {
+                    i32::try_from(value).ok()
+                });
+
+        let response_id =
+            item.get("response_id")
+                .and_then(Value::as_str);
+
+        let usage =
+            item.get("usage")
+                .and_then(Value::as_object);
+
+        let usage_known =
+            usage.is_some();
+
+        let token =
+            |name: &str| -> Option<i64> {
+                usage
+                    .and_then(|value| {
+                        value.get(name)
+                    })
+                    .and_then(Value::as_i64)
+            };
+
+        let attempt_id =
+            deterministic_id(
+                "prov_attempt",
+                &format!(
+                    "{}:{}:{}",
+                    operation.id,
+                    operation.attempt_count,
+                    ordinal,
+                ),
+            );
+
+        sqlx::query(
+            r#"
+            INSERT INTO
+                provider_attempt_events (
+                    id,
+                    operation_id,
+                    run_id,
+                    workspace_id,
+                    operation_attempt_number,
+                    provider_call_ordinal,
+                    phase,
+                    provider_name,
+                    model,
+                    outcome,
+                    provider_error_code,
+                    http_status,
+                    provider_response_id,
+                    usage_known,
+                    input_tokens,
+                    cached_input_tokens,
+                    output_tokens,
+                    reasoning_tokens,
+                    total_tokens,
+                    provider_cost_usd,
+                    cost_known,
+                    customer_billable
+                )
+            VALUES (
+                $1,$2,$3,$4,$5,$6,
+                $7,$8,$9,$10,$11,$12,
+                $13,$14,$15,$16,$17,
+                $18,$19,
+                NULL,
+                false,
+                false
+            )
+
+            ON CONFLICT (
+                operation_id,
+                operation_attempt_number,
+                provider_call_ordinal
+            )
+            DO NOTHING
+            "#,
+        )
+        .bind(attempt_id)
+        .bind(&operation.id)
+        .bind(&operation.run_id)
+        .bind(&operation.workspace_id)
+        .bind(operation.attempt_count)
+        .bind(ordinal)
+        .bind(phase)
+        .bind(provider)
+        .bind(model)
+        .bind(outcome)
+        .bind(error_code)
+        .bind(http_status)
+        .bind(response_id)
+        .bind(usage_known)
+        .bind(token("input_tokens"))
+        .bind(token(
+            "cached_input_tokens"
+        ))
+        .bind(token("output_tokens"))
+        .bind(token(
+            "reasoning_tokens"
+        ))
+        .bind(token("total_tokens"))
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+
 async fn complete_operation(
     state: &AppState,
     operation: &ClaimedOperation,
@@ -3853,6 +4022,19 @@ async fn complete_operation(
 
     sqlx::query(
         r#"
+        UPDATE provider_attempt_events
+        SET customer_billable = true
+        WHERE operation_id = $1
+          AND operation_attempt_number = $2
+        "#,
+    )
+    .bind(&operation.id)
+    .bind(operation.attempt_count)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
         UPDATE runs
         SET
             status = $2,
@@ -3935,6 +4117,55 @@ async fn record_failure(
         .await?;
 
         if updated.rows_affected() == 1 {
+            let failure_id =
+                deterministic_id(
+                    "fail",
+                    &format!(
+                        "{}:{}",
+                        operation.id,
+                        operation.attempt_count
+                    ),
+                );
+
+            sqlx::query(
+                r#"
+                INSERT INTO operation_failure_events (
+                    id,
+                    operation_id,
+                    run_id,
+                    workspace_id,
+                    attempt_number,
+                    error_code,
+                    retryable,
+                    will_retry
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    true
+                )
+                ON CONFLICT (
+                    operation_id,
+                    attempt_number
+                )
+                DO NOTHING
+                "#,
+            )
+            .bind(failure_id)
+            .bind(&operation.id)
+            .bind(&operation.run_id)
+            .bind(&operation.workspace_id)
+            .bind(operation.attempt_count)
+            .bind(code)
+            .bind(retryable)
+            .execute(&mut *tx)
+            .await?;
+
             sqlx::query(
                 r#"
                 UPDATE runs
@@ -3980,6 +4211,55 @@ async fn record_failure(
         .await?;
 
         if updated.rows_affected() == 1 {
+            let failure_id =
+                deterministic_id(
+                    "fail",
+                    &format!(
+                        "{}:{}",
+                        operation.id,
+                        operation.attempt_count
+                    ),
+                );
+
+            sqlx::query(
+                r#"
+                INSERT INTO operation_failure_events (
+                    id,
+                    operation_id,
+                    run_id,
+                    workspace_id,
+                    attempt_number,
+                    error_code,
+                    retryable,
+                    will_retry
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    false
+                )
+                ON CONFLICT (
+                    operation_id,
+                    attempt_number
+                )
+                DO NOTHING
+                "#,
+            )
+            .bind(failure_id)
+            .bind(&operation.id)
+            .bind(&operation.run_id)
+            .bind(&operation.workspace_id)
+            .bind(operation.attempt_count)
+            .bind(code)
+            .bind(retryable)
+            .execute(&mut *tx)
+            .await?;
+
             sqlx::query(
                 r#"
                 UPDATE runs
@@ -5698,6 +5978,150 @@ async fn process_operation(
     let mut latest_input:
         Option<Value> = None;
 
+    //
+    // Every continuation receives the durable
+    // trajectory that happened earlier in this run.
+    //
+    // This is run-state evidence, not executable
+    // customer instruction. It prevents the model
+    // from repeatedly asking for an input or action
+    // that has already been supplied/executed.
+    //
+    let history_rows =
+        sqlx::query_as::<
+            _,
+            (
+                i32,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            r#"
+            SELECT
+                d.sequence,
+                d.decision_json::text,
+                i.input_json::text,
+                o.observation_json::text
+
+            FROM decisions d
+
+            LEFT JOIN run_inputs i
+              ON i.run_id = d.run_id
+             AND i.workspace_id =
+                 d.workspace_id
+             AND i.sequence = d.sequence
+
+            LEFT JOIN observations o
+              ON o.run_id = d.run_id
+             AND o.workspace_id =
+                 d.workspace_id
+             AND o.sequence = d.sequence
+
+            WHERE d.run_id = $1
+              AND d.workspace_id = $2
+              AND d.sequence < $3
+
+            ORDER BY d.sequence ASC
+            "#,
+        )
+        .bind(&operation.run_id)
+        .bind(&operation.workspace_id)
+        .bind(operation.sequence)
+        .fetch_all(&state.db)
+        .await?;
+
+    let mut run_history: Vec<Value> =
+        Vec::with_capacity(
+            history_rows.len()
+        );
+
+    for (
+        sequence,
+        decision_text,
+        input_text,
+        observation_text,
+    ) in history_rows
+    {
+        let decision_value =
+            match serde_json::from_str::<Value>(
+                &decision_text
+            ) {
+                Ok(value) => value,
+
+                Err(_) => {
+                    record_failure(
+                        state,
+                        operation,
+                        "invalid_history_decision_json",
+                        false,
+                    )
+                    .await?;
+
+                    return Ok(());
+                }
+            };
+
+        let input_value =
+            match input_text {
+                Some(text) => {
+                    match serde_json::from_str::<Value>(
+                        &text
+                    ) {
+                        Ok(value) => Some(value),
+
+                        Err(_) => {
+                            record_failure(
+                                state,
+                                operation,
+                                "invalid_history_input_json",
+                                false,
+                            )
+                            .await?;
+
+                            return Ok(());
+                        }
+                    }
+                }
+
+                None => None,
+            };
+
+        let observation_value =
+            match observation_text {
+                Some(text) => {
+                    match serde_json::from_str::<Value>(
+                        &text
+                    ) {
+                        Ok(value) => Some(value),
+
+                        Err(_) => {
+                            record_failure(
+                                state,
+                                operation,
+                                "invalid_history_observation_json",
+                                false,
+                            )
+                            .await?;
+
+                            return Ok(());
+                        }
+                    }
+                }
+
+                None => None,
+            };
+
+        run_history.push(
+            json!({
+                "sequence": sequence,
+                "decision": decision_value,
+                "customer_input": input_value,
+                "observation": observation_value,
+            })
+        );
+    }
+
     if operation.kind
         == "input_continuation"
     {
@@ -6104,6 +6528,19 @@ async fn process_operation(
         return Ok(());
     }
 
+    if !run_history.is_empty() {
+        runtime_object
+            .get_mut("context")
+            .and_then(Value::as_object_mut)
+            .expect(
+                "context validated as object"
+            )
+            .insert(
+                "run_history".to_string(),
+                Value::Array(run_history),
+            );
+    }
+
     if let Some(observation) =
         latest_observation
     {
@@ -6231,6 +6668,23 @@ async fn process_operation(
                             TOO_MANY_REQUESTS
             });
 
+        if let Some(attempts) =
+            parsed
+                .as_ref()
+                .and_then(|value| {
+                    value.pointer(
+                        "/detail/provider_attempts"
+                    )
+                })
+        {
+            persist_provider_attempts(
+                state,
+                operation,
+                attempts,
+            )
+            .await?;
+        }
+
         record_failure(
             state,
             operation,
@@ -6261,6 +6715,19 @@ async fn process_operation(
             }
         };
 
+    if let Some(attempts) =
+        body.pointer(
+            "/provider/attempts"
+        )
+    {
+        persist_provider_attempts(
+            state,
+            operation,
+            attempts,
+        )
+        .await?;
+    }
+
     let decision_status =
         body.pointer(
             "/decision/status"
@@ -6271,6 +6738,14 @@ async fn process_operation(
         body.get("provider")
             .and_then(Value::as_object)
             .is_some();
+
+    let attempts_valid =
+        body.pointer(
+            "/provider/attempts"
+        )
+        .and_then(Value::as_array)
+        .map(|items| !items.is_empty())
+        .unwrap_or(false);
 
     let usage_valid =
         body.pointer(
@@ -6360,7 +6835,10 @@ async fn process_operation(
             }
         };
 
-    if !provider_valid || !usage_valid {
+    if !provider_valid
+        || !usage_valid
+        || !attempts_valid
+    {
         record_failure(
             state,
             operation,

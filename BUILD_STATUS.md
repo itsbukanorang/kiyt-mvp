@@ -15,12 +15,12 @@ Updated: 4 November 2026 (UTC+7)
 | 06 Three memories | PASS | Working, episodic and semantic memory production acceptance 60/60 PASS |
 | 07 Evaluation + online RL | PASS | ALK evaluation, deterministic KIYT reward mapping, immutable policy evidence, workspace-scoped MABWiser LinUCB learning and final production policy E2E verified |
 | 08 Playground integration | PASS | Real Playground run creation, polling, structured decisions, observation continuation, durable `needs_input` continuation, reload resume and production browser E2E verified |
-| 09 Runs + usage + billing | NOT_STARTED | Real run / usage data path pending |
+| 09 Runs + usage + billing | PASS | Real run history, usage accounting, Activity Tokens, customer billing views, provider-attempt ledger and production reconciliation verified |
 | 10 API documentation | NOT_STARTED | External quickstart pending |
 | 11 Release verification | NOT_STARTED | Final production release gate after Modules 05–10 |
 | 12 Global KIYT learning | NOT_STARTED | Permissioned, abstracted global learning pipeline with holdout evaluation and manual activation |
 
-**Modules 00–08 PASS (9 completed milestones). Module 09 is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
+**Modules 00–09 PASS (10 completed milestones). Module 10 API documentation is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
 
 ## Module 04 Evidence
 
@@ -63,9 +63,9 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 ## Current build position
 
-- Modules 00–08: PASS.
+- Modules 00–09: PASS.
 - Module 06 — Three memories: PASS (60/60 production hard tests).
-- Completed milestones: Modules 00–08 PASS (9 milestones).
+- Completed milestones: Modules 00–09 PASS (10 milestones).
 - Pre-Module 08 API contract hardening: PASS at `main@75d75de6aff6e8a9aa67d5d8fbe780933d591339`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
@@ -100,7 +100,7 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Deployment-only configuration remains outside the public repository.
 - Runtime secrets remain outside Git.
 
-Current project next milestone: Module 09 — Runs + usage + billing.
+Current project next milestone: Module 10 — API documentation.
 
 
 ## Module 06 production completion
@@ -122,7 +122,7 @@ Module 06 completed production acceptance on 4 November 2026 (UTC+7).
 - Production health and logs: PASS.
 - Test fixtures cleaned: PASS.
 
-Execution order after Module 07: `09 → 10 → 11 → 12`.
+Execution order after Module 09: `10 → 11 → 12`.
 
 ## Module 07 production completion
 
@@ -174,7 +174,43 @@ Module 08 completed production acceptance on 4 November 2026 (UTC+7).
 - Browser E2E `INPUT NEEDED → Continue run → reasoning → next decision`: PASS.
 - Production secrets and deployment-only configuration remain outside Git.
 
-Current next milestone: Module 09 — Runs + usage + billing.
+Current next milestone: Module 10 — API documentation.
+
+## Module 09 production completion
+
+Module 09 completed production acceptance on 4 November 2026 (UTC+7).
+
+- Customer console Overview, Runs and Billing use real persisted run and usage data.
+- Customer-facing usage is expressed as Activity Tokens (AT); display is fixed to two decimal places.
+- Public customer pricing is `$5 / 1,000 AT`.
+- Internal Activity Token calculation and private billing implementation remain server-only and are intentionally excluded from the public repository.
+- Runs list exposes customer-safe run status, decision/observation state and real AT usage without provider/model economics.
+- Run detail exposes customer-safe lifecycle, decision history, observations, durable operations and AT usage.
+- Provider/model names, raw provider-token economics and internal supplier cost are not exposed in the customer billing UI.
+- Migration `013_usage_cost_accounting.sql`: production applied.
+- Module 09 immutable benchmark: `m09_270_20261104T031838Z`.
+- Benchmark scope: 30 scenarios × 3 context sizes × 3 repetitions = 270 real runs.
+- Benchmark baseline preserved at 270 accounting snapshot rows.
+- Cross-workspace leakage: 0.
+- Duplicate billing: 0.
+- Duplicate learning: 0.
+- Unknown provider cost is not guessed or falsely billed.
+- Provider-attempt ledger migration `017_provider_attempt_events.sql`: production applied.
+- Provider-attempt runtime/gateway candidate deployed and production health verified.
+- Final real provider-ledger validation run: completed.
+- Final operation attempt count: 1 of max 3; no retry required.
+- Provider attempts persisted: 2 — one router attempt and one decision attempt.
+- Router attempt: success, HTTP 200, provider usage known.
+- Decision attempt: success, HTTP 200, provider usage known.
+- Provider-attempt ledger ↔ `usage_events` reconciliation: PASS.
+- Failed provider attempts billed to customer: 0.
+- Duplicate provider-attempt groups: 0.
+- Provider-ledger tenant mismatch: 0.
+- Guessed provider cost rows: 0.
+- Temporary validation API keys remaining: 0.
+- Final Module 09 database assertion: `PASS`.
+- Private billing migrations/views containing internal pricing logic remain outside Git.
+- Production secrets and deployment-only configuration remain outside Git.
 
 ## Module 12 — Global KIYT Learning
 

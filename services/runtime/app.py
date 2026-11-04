@@ -742,6 +742,10 @@ async def cognition_decide(
                 "retry_after"
             ] = exc.retry_after
 
+        detail[
+            "provider_attempts"
+        ] = exc.provider_attempts
+
         raise HTTPException(
             status_code=(
                 503
@@ -812,5 +816,7 @@ async def cognition_decide(
                     meta.decision_usage
                 ),
             },
+            "attempts":
+                meta.provider_attempts,
         },
     }

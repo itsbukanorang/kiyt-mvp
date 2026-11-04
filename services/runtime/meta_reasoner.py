@@ -14,6 +14,7 @@ This module never executes customer actions.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 import json
 import os
@@ -35,6 +36,25 @@ MAIN_EFFORTS = {
 }
 
 
+_PROVIDER_ATTEMPTS: ContextVar[
+    list[dict[str, Any]] | None
+] = ContextVar(
+    "kiyt_provider_attempts",
+    default=None,
+)
+
+
+def _provider_attempts_snapshot(
+) -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in (
+            _PROVIDER_ATTEMPTS.get()
+            or []
+        )
+    ]
+
+
 class MetaProviderError(RuntimeError):
     def __init__(
         self,
@@ -50,6 +70,9 @@ class MetaProviderError(RuntimeError):
         self.retryable = retryable
         self.status_code = status_code
         self.retry_after = retry_after
+        self.provider_attempts = (
+            _provider_attempts_snapshot()
+        )
 
 
 @dataclass(frozen=True)
@@ -68,6 +91,9 @@ class MetaDecision:
     router_usage: MetaUsage
     decision_usage: MetaUsage
     provider_response_id: str | None
+    provider_attempts: list[
+        dict[str, Any]
+    ]
 
 
 def _int_env(
@@ -514,7 +540,91 @@ class MetaReasoner:
     async def _post(
         self,
         payload: dict[str, Any],
+        *,
+        phase: str,
     ) -> dict[str, Any]:
+        def record_attempt(
+            *,
+            outcome: str,
+            error_code: str | None = None,
+            http_status: int | None = None,
+            response_data: (
+                dict[str, Any] | None
+            ) = None,
+        ) -> None:
+            attempts = (
+                _PROVIDER_ATTEMPTS.get()
+            )
+
+            if attempts is None:
+                attempts = []
+                _PROVIDER_ATTEMPTS.set(
+                    attempts
+                )
+
+            usage_payload = None
+            response_id = None
+
+            if isinstance(
+                response_data,
+                dict,
+            ):
+                raw_usage = (
+                    response_data.get(
+                        "usage"
+                    )
+                )
+
+                if isinstance(
+                    raw_usage,
+                    dict,
+                ):
+                    usage = _usage(
+                        response_data
+                    )
+
+                    usage_payload = {
+                        "input_tokens":
+                            usage.input_tokens,
+                        "cached_input_tokens":
+                            usage.cached_input_tokens,
+                        "output_tokens":
+                            usage.output_tokens,
+                        "reasoning_tokens":
+                            usage.reasoning_tokens,
+                        "total_tokens":
+                            usage.total_tokens,
+                    }
+
+                raw_id = (
+                    response_data.get("id")
+                )
+
+                if isinstance(
+                    raw_id,
+                    str,
+                ):
+                    response_id = raw_id
+
+            attempts.append(
+                {
+                    "ordinal":
+                        len(attempts) + 1,
+                    "phase": phase,
+                    "provider": "meta",
+                    "model": self.model,
+                    "outcome": outcome,
+                    "error_code":
+                        error_code,
+                    "http_status":
+                        http_status,
+                    "response_id":
+                        response_id,
+                    "usage":
+                        usage_payload,
+                }
+            )
+
         try:
             response = await self.client.post(
                 "/responses",
@@ -525,6 +635,12 @@ class MetaReasoner:
             httpx.TimeoutException,
             httpx.NetworkError,
         ) as exc:
+            record_attempt(
+                outcome="transport_failure",
+                error_code=
+                    "meta_transport_failure",
+            )
+
             raise MetaProviderError(
                 "meta_transport_failure",
                 retryable=True,
@@ -536,9 +652,36 @@ class MetaReasoner:
                 or response.status_code >= 500
             )
 
-            raise MetaProviderError(
+            error_data = None
+
+            try:
+                candidate = response.json()
+
+                if isinstance(
+                    candidate,
+                    dict,
+                ):
+                    error_data = candidate
+
+            except ValueError:
+                pass
+
+            code = (
                 "meta_http_"
-                + str(response.status_code),
+                + str(response.status_code)
+            )
+
+            record_attempt(
+                outcome="http_error",
+                error_code=code,
+                http_status=
+                    response.status_code,
+                response_data=
+                    error_data,
+            )
+
+            raise MetaProviderError(
+                code,
                 retryable=retryable,
                 status_code=(
                     response.status_code
@@ -554,12 +697,28 @@ class MetaReasoner:
             data = response.json()
 
         except ValueError as exc:
+            record_attempt(
+                outcome="invalid_json",
+                error_code=
+                    "meta_invalid_json",
+                http_status=
+                    response.status_code,
+            )
+
             raise MetaProviderError(
                 "meta_invalid_json",
                 retryable=True,
             ) from exc
 
         if not isinstance(data, dict):
+            record_attempt(
+                outcome="invalid_response",
+                error_code=
+                    "meta_invalid_response",
+                http_status=
+                    response.status_code,
+            )
+
             raise MetaProviderError(
                 "meta_invalid_response",
                 retryable=True,
@@ -571,11 +730,31 @@ class MetaReasoner:
             None,
             "completed",
         }:
-            raise MetaProviderError(
+            code = (
                 "meta_response_"
-                + str(status),
+                + str(status)
+            )
+
+            record_attempt(
+                outcome=
+                    "provider_response_error",
+                error_code=code,
+                http_status=
+                    response.status_code,
+                response_data=data,
+            )
+
+            raise MetaProviderError(
+                code,
                 retryable=False,
             )
+
+        record_attempt(
+            outcome="success",
+            http_status=
+                response.status_code,
+            response_data=data,
+        )
 
         return data
 
@@ -699,7 +878,8 @@ class MetaReasoner:
 
         for attempt in range(2):
             response = await self._post(
-                payload
+                payload,
+                phase="router",
             )
 
             try:
@@ -707,16 +887,21 @@ class MetaReasoner:
                     _output_text(response)
                 )
 
-            except json.JSONDecodeError as exc:
-                last_json_error = exc
-
-                if attempt == 0:
-                    continue
-
-                raise MetaProviderError(
-                    "meta_invalid_effort_json",
-                    retryable=True,
-                ) from exc
+            except json.JSONDecodeError:
+                #
+                # Effort routing is advisory.
+                #
+                # A malformed router response must
+                # not fail the cognitive operation
+                # and must not trigger another
+                # provider attempt. Preserve usage
+                # from this response and continue
+                # with the safe default.
+                #
+                return (
+                    "medium",
+                    _usage(response),
+                )
 
             effort = result.get("effort")
 
@@ -726,12 +911,9 @@ class MetaReasoner:
                     _usage(response),
                 )
 
-            if attempt == 0:
-                continue
-
-            raise MetaProviderError(
-                "meta_invalid_effort",
-                retryable=True,
+            return (
+                "medium",
+                _usage(response),
             )
 
         raise MetaProviderError(
@@ -743,6 +925,8 @@ class MetaReasoner:
         self,
         state: dict[str, Any],
     ) -> MetaDecision:
+        _PROVIDER_ATTEMPTS.set([])
+
         objective = state.get("objective")
         context = state.get("context")
         actions = (
@@ -808,7 +992,18 @@ class MetaReasoner:
                     "run-state evidence when they "
                     "are relevant to the current "
                     "objective and available-action "
-                    "contract. In particular, a "
+                    "contract. Structured "
+                    "run_history, latest_input, and "
+                    "latest_observation are durable "
+                    "evidence of earlier steps in "
+                    "this same run. Do not request "
+                    "customer input already present "
+                    "there. Do not request an action "
+                    "again when its successful "
+                    "observation is already present, "
+                    "unless another execution is "
+                    "genuinely required by the "
+                    "objective. In particular, a "
                     "structured latest_observation "
                     "may be used as the latest "
                     "reported observation without "
@@ -893,7 +1088,8 @@ class MetaReasoner:
         )
 
         response = await self._post(
-            payload
+            payload,
+            phase="decision",
         )
 
         try:
@@ -938,6 +1134,9 @@ class MetaReasoner:
             ),
             provider_response_id=(
                 response_id
+            ),
+            provider_attempts=(
+                _provider_attempts_snapshot()
             ),
         )
 
