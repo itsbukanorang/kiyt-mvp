@@ -81,11 +81,11 @@ Production deployment configuration, host paths, credentials, private environmen
 | 07 Evaluation + online RL | PASS |
 | 08 Playground integration | PASS |
 | 09 Runs + usage + billing | PASS |
-| 10 API documentation | NOT_STARTED |
-| 11 Release verification | NOT_STARTED |
+| 10 API documentation | PASS |
+| 11 Release verification | NEXT |
 | 12 Global KIYT learning | NOT_STARTED |
 
-**Current position: Modules 00–09 PASS — 10 completed milestones. Module 10 API documentation is next. Module 11 remains the MVP service release gate; Module 12 is an extended global-learning milestone.**
+**Current position: Modules 00–10 PASS — 11 completed milestones. Module 11 final release verification is next. Module 12 remains an extended global-learning milestone after the MVP service release gate.**
 
 Module 04 includes multi-workspace tenancy, owner/admin/member roles, hashed and revocable workspace API keys, and Rust Bearer authentication with tenant resolution.
 
@@ -97,11 +97,15 @@ Module 08 is production complete. The Playground now creates real cognitive runs
 
 Module 09 is production complete. The console now exposes real run history, customer-safe run detail, Activity Token usage and billing data. Production acceptance includes the immutable 270-run benchmark, durable provider-attempt accounting, router/decision usage reconciliation, zero duplicate billing, zero cross-workspace ledger mismatch, and no guessed provider cost. Public pricing is **$5 / 1,000 AT**; the internal Activity Token calculation remains private and is intentionally excluded from this repository.
 
+Module 10 is production complete. Public developer documentation is live at **https://console.kiyt.io/docs** with 17 documentation routes, OpenAPI 3.1, copyable examples for **cURL, Python, Rust and TypeScript**, and four downloadable end-to-end quickstarts. The documentation also includes a deterministic browser-local **Run test** sandbox that requires no API key, sends no request to KIYT, invokes no model and consumes **0 Activity Tokens**. Production acceptance verified all documentation routes, downloadable examples, OpenAPI assets and existing console login behavior.
+
 Module 12 extends KIYT with global learning from eligible, permissioned and abstracted usage. Candidate improvements are evaluated against held-out tests and require an explicit release decision before activation. Raw private customer memory, secrets, identifiers and proprietary content are excluded from shared learning data.
 
-Current execution priority: `10 → 11 → 12`.
+Current execution priority: `11 → 12`.
 
 ## Public Cognitive API Direction
+
+Developer documentation: **https://console.kiyt.io/docs**
 
 ```text
 POST /api/v1/runs

@@ -16,11 +16,11 @@ Updated: 4 November 2026 (UTC+7)
 | 07 Evaluation + online RL | PASS | ALK evaluation, deterministic KIYT reward mapping, immutable policy evidence, workspace-scoped MABWiser LinUCB learning and final production policy E2E verified |
 | 08 Playground integration | PASS | Real Playground run creation, polling, structured decisions, observation continuation, durable `needs_input` continuation, reload resume and production browser E2E verified |
 | 09 Runs + usage + billing | PASS | Real run history, usage accounting, Activity Tokens, customer billing views, provider-attempt ledger and production reconciliation verified |
-| 10 API documentation | NOT_STARTED | External quickstart pending |
-| 11 Release verification | NOT_STARTED | Final production release gate after Modules 05–10 |
+| 10 API documentation | PASS | Public docs live; 17/17 routes, OpenAPI 3.1, cURL/Python/Rust/TypeScript examples, downloadable quickstarts and deterministic local 0-AT sandbox verified in production |
+| 11 Release verification | NEXT | Final production release gate after Modules 05–10 |
 | 12 Global KIYT learning | NOT_STARTED | Permissioned, abstracted global learning pipeline with holdout evaluation and manual activation |
 
-**Modules 00–09 PASS (10 completed milestones). Module 10 API documentation is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
+**Modules 00–10 PASS (11 completed milestones). Module 11 final release verification is next. Module 12 is an extended learning milestone and does not block the MVP service release at Module 11.**
 
 ## Module 04 Evidence
 
@@ -63,9 +63,9 @@ Module 05 is PASS. Production acceptance verified the real provider path, durabl
 
 ## Current build position
 
-- Modules 00–09: PASS.
+- Modules 00–10: PASS.
 - Module 06 — Three memories: PASS (60/60 production hard tests).
-- Completed milestones: Modules 00–09 PASS (10 milestones).
+- Completed milestones: Modules 00–10 PASS (11 milestones).
 - Pre-Module 08 API contract hardening: PASS at `main@75d75de6aff6e8a9aa67d5d8fbe780933d591339`.
 - Public Module 05 acceptance: 10/10 PASS.
 - Production migration 005: applied.
@@ -100,7 +100,7 @@ Module 05 completed production acceptance on 3 November 2026 (UTC+7).
 - Deployment-only configuration remains outside the public repository.
 - Runtime secrets remain outside Git.
 
-Current project next milestone: Module 10 — API documentation.
+Current project next milestone: Module 11 — Final release verification.
 
 
 ## Module 06 production completion
@@ -122,7 +122,7 @@ Module 06 completed production acceptance on 4 November 2026 (UTC+7).
 - Production health and logs: PASS.
 - Test fixtures cleaned: PASS.
 
-Execution order after Module 09: `10 → 11 → 12`.
+Execution order after Module 10: `11 → 12`.
 
 ## Module 07 production completion
 
@@ -211,6 +211,45 @@ Module 09 completed production acceptance on 4 November 2026 (UTC+7).
 - Final Module 09 database assertion: `PASS`.
 - Private billing migrations/views containing internal pricing logic remain outside Git.
 - Production secrets and deployment-only configuration remain outside Git.
+
+## Module 10 production completion
+
+Module 10 completed production acceptance on 4 November 2026 (UTC+7).
+
+- Release commit: `6f6c37245f0aeb39295cf4431a2c0c067bf4c5b7`.
+- Public developer documentation: `https://console.kiyt.io/docs`.
+- Documentation routes: 17/17 PASS.
+- OpenAPI 3.1: PASS.
+- Public examples: cURL, Python, Rust and TypeScript.
+- Downloadable quickstarts: `quickstart.sh`, `quickstart.py`, `quickstart.rs`, `quickstart.ts` — 4/4 PASS.
+- Deterministic browser-local `Run test` sandbox: PASS.
+- Sandbox requires no API key.
+- Sandbox sends no network request to KIYT.
+- Sandbox invokes no reasoning provider or model.
+- Sandbox Activity Token usage: 0 AT.
+- Targeted Module 10 ESLint: 0 errors, 2 `<img>` optimization warnings.
+- Canonical Docker / Next.js 16.4.1 production build: PASS.
+- Existing console login behavior remained unchanged (`307` to `/`, final destination healthy).
+- Production console image: `kiyt-console:m10-docs-sandbox-v4-candidate`.
+- Production image ID: `sha256:67cbf4b290545e9990d351ff6bdf7aa9bddd7638b47493408bcdf809a8c4bf9d`.
+- Module 10 production rollback was not required.
+- Production secrets and deployment-only configuration remain outside Git.
+
+### Open release hardening before Module 11
+
+A source audit during Module 10 confirmed that the current public
+`GET /api/v1/runs/{run_id}` path uses a serializer that still assembles internal
+`provider` and `evaluation` metadata.
+
+The public documentation intentionally does not document these internal fields.
+
+Before Module 11 can mark the MVP service release PASS, the public response
+boundary must be hardened so provider/model/raw-usage internals and evaluation
+artifacts are not exposed to customer API clients, while preserving internal
+console/reporting paths that legitimately require them.
+
+Module 10 documentation itself is PASS. This serializer cleanup is a Module 11
+release-boundary requirement.
 
 ## Module 12 — Global KIYT Learning
 
