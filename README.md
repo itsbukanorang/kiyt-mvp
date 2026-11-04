@@ -39,6 +39,19 @@ KIYT changed shape quickly during this hackathon.
 - **Two days ago** — I started this repository with a cleaner structure, adapting the strongest parts of my private KIYT MVP repository, which was still at a very early stage.
 - **Today** — The new architecture works end to end. This hackathon helped me simplify the product, find the right technical direction, and turn KIYT into a working MVP.
 
+## Built During the Project
+
+In the rebuilt repository, the last two days focused on turning KIYT from an early MVP foundation into a working cognitive platform.
+
+- **Cognitive API** — real decision-making through a durable API lifecycle.
+- **Persistent Memory** — working, episodic, and semantic memory across runs.
+- **Adaptive Learning** — evaluated outcomes, rewards, and workspace-level policy learning.
+- **Developer Console** — workspace management, API keys, Playground, runs, usage, and billing visibility.
+- **Executable Playground** — guided Easy, Medium, and Hard scenarios using real KIYT API calls.
+- **Public API Documentation** — OpenAPI contract, quickstarts, examples, and developer documentation.
+- **Production Reliability** — tenant isolation, idempotency, persistence, recovery, and release verification.
+- **Global Learning Foundation** — the architecture is now ready for the next phase of KIYT model training and reinforcement learning.
+
 ---
 
 [Third-party notices](thirdparty/)
