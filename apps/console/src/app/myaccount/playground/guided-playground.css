@@ -1,0 +1,399 @@
+.guided-playground .surface{
+  background:#0f1a2a;
+  box-shadow:none
+}
+
+.guided-playground{
+  display:flex;
+  flex-direction:column;
+  gap:18px
+}
+
+.guided-note{
+  padding:11px 14px;
+  border:1px solid #2a405d;
+  border-radius:9px;
+  background:#0b1626;
+  color:#afc3df;
+  font-size:11px
+}
+
+.guided-tabs{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap
+}
+
+.guided-tabs button{
+  min-width:90px;
+  min-height:39px;
+  padding:8px 14px;
+  border:1px solid #314b6d;
+  border-radius:8px;
+  background:#0f1c2e;
+  color:#b8c9e0
+}
+
+.guided-tabs button.active{
+  border-color:#6f9bd3;
+  background:#193353;
+  color:white
+}
+
+.guided-tabs button:disabled{
+  opacity:.55
+}
+
+.guided-main-grid{
+  display:grid;
+  grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
+  gap:18px
+}
+
+.guided-task-card,
+.guided-result-card,
+.guided-input-card,
+.guided-activity-card,
+.guided-api-card{
+  padding:22px
+}
+
+.guided-card-head{
+  display:flex;
+  justify-content:space-between;
+  gap:18px;
+  align-items:flex-start
+}
+
+.guided-card-head>div>span{
+  font:9px Mono;
+  letter-spacing:1.2px;
+  color:#8eacd3
+}
+
+.guided-card-head h2{
+  margin:5px 0 7px;
+  font-size:18px
+}
+
+.guided-card-head p{
+  color:#a8b9d2;
+  font-size:11px;
+  line-height:1.75
+}
+
+.guided-fields{
+  display:grid;
+  gap:13px;
+  margin-top:20px
+}
+
+.guided-fields label,
+.guided-input-grid label{
+  display:grid;
+  gap:7px;
+  color:#cbd9eb;
+  font-size:11px
+}
+
+.guided-fields input,
+.guided-fields select,
+.guided-input-grid input,
+.guided-input-grid select,
+.guided-input-grid textarea{
+  width:100%;
+  min-height:41px;
+  padding:9px 11px;
+  border:1px solid #405c7d;
+  border-radius:7px;
+  background:#080f1d;
+  color:#eef5ff
+}
+
+.guided-mini-grid,
+.guided-input-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px
+}
+
+.guided-input-grid{
+  margin:18px 0
+}
+
+.guided-input-grid .wide{
+  grid-column:1/-1
+}
+
+.guided-options{
+  display:grid;
+  gap:8px
+}
+
+.guided-options span{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  border:1px solid #293f5d;
+  border-radius:7px;
+  background:#0b1626;
+  color:#c5d5e9;
+  font-size:10px
+}
+
+.guided-options strong{
+  font-weight:500;
+  color:#eef5ff
+}
+
+.guided-hard-summary,
+.guided-running-summary{
+  margin-top:18px;
+  padding:14px;
+  border:1px solid #2d4562;
+  border-radius:8px;
+  background:#0a1524;
+  color:#b7c9e1;
+  font-size:11px;
+  line-height:1.75
+}
+
+.guided-hard-summary p+p{
+  margin-top:8px
+}
+
+.guided-running-summary{
+  display:grid;
+  gap:8px
+}
+
+.guided-running-summary code{
+  overflow:auto;
+  color:#9fc7fa;
+  font:10px Mono
+}
+
+.guided-primary-row{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:18px
+}
+
+.guided-result-body{
+  display:grid;
+  gap:12px;
+  margin-top:20px
+}
+
+.guided-result-row{
+  display:flex;
+  justify-content:space-between;
+  gap:14px;
+  padding-bottom:10px;
+  border-bottom:1px solid #263a54;
+  font-size:11px
+}
+
+.guided-result-row span{
+  color:#92a9c7
+}
+
+.guided-result-row strong{
+  max-width:60%;
+  text-align:right;
+  color:#e5eefb
+}
+
+.guided-reason{
+  padding:12px;
+  border:1px solid #2c4361;
+  border-radius:7px;
+  background:#0a1524;
+  color:#b8cae1;
+  font-size:11px;
+  line-height:1.75
+}
+
+.guided-code{
+  max-height:320px;
+  margin:0;
+  padding:13px;
+  overflow:auto;
+  border:1px solid #314965;
+  border-radius:7px;
+  background:#07101c;
+  color:#bed2ed;
+  white-space:pre;
+  font:10px/1.7 Mono
+}
+
+.guided-empty{
+  display:grid;
+  place-items:center;
+  min-height:190px;
+  padding:24px;
+  text-align:center;
+  color:#91a6c3;
+  font-size:11px
+}
+
+.guided-empty.small{
+  min-height:100px
+}
+
+.guided-error{
+  display:flex;
+  gap:9px;
+  align-items:center;
+  padding:12px 14px;
+  border:1px solid #7b4d49;
+  border-radius:8px;
+  background:#382425;
+  color:#f1c1bb;
+  font-size:11px
+}
+
+.guided-activity-list{
+  display:grid;
+  margin-top:16px
+}
+
+.guided-activity-list>div{
+  display:grid;
+  grid-template-columns:75px 70px 1fr;
+  gap:12px;
+  align-items:start;
+  padding:12px 0;
+  border-top:1px solid #263a54
+}
+
+.guided-activity-list>div>span{
+  color:#8ea5c5;
+  font:9px Mono
+}
+
+.guided-activity-list p{
+  display:grid;
+  gap:2px;
+  color:#aebfd6;
+  font-size:10px
+}
+
+.guided-activity-list strong{
+  color:#e8f1fd;
+  font-size:11px
+}
+
+.guided-footer-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  flex-wrap:wrap
+}
+
+.guided-api-card{
+  display:grid;
+  gap:9px
+}
+
+.guided-api-card p{
+  color:#abc0dc;
+  font-size:11px;
+  line-height:1.8
+}
+
+.guided-api-card strong{
+  color:#e8f1fc
+}
+
+.guided-api-card code{
+  font:10px Mono;
+  color:#a9ccfb
+}
+
+.guided-advanced-wrap>.button{
+  margin-bottom:18px
+}
+
+.guided-input-card>.button{
+  margin-top:2px
+}
+
+@media(max-width:900px){
+  .guided-main-grid{
+    grid-template-columns:1fr
+  }
+}
+
+@media(max-width:620px){
+  .guided-task-card,
+  .guided-result-card,
+  .guided-input-card,
+  .guided-activity-card,
+  .guided-api-card{
+    padding:16px
+  }
+
+  .guided-card-head{
+    flex-direction:column
+  }
+
+  .guided-mini-grid,
+  .guided-input-grid{
+    grid-template-columns:1fr
+  }
+
+  .guided-input-grid .wide{
+    grid-column:auto
+  }
+
+  .guided-activity-list>div{
+    grid-template-columns:60px 1fr
+  }
+
+  .guided-activity-list p{
+    grid-column:1/-1
+  }
+
+  .guided-result-row{
+    align-items:flex-start;
+    flex-direction:column
+  }
+
+  .guided-result-row strong{
+    max-width:none;
+    text-align:left
+  }
+
+  .guided-options span{
+    flex-direction:column
+  }
+
+  .guided-tabs{
+    display:grid;
+    grid-template-columns:repeat(3,1fr)
+  }
+
+  .guided-tabs button{
+    min-width:0
+  }
+
+  .guided-footer-actions{
+    justify-content:flex-start
+  }
+
+  .guided-playground .page-title{
+    align-items:flex-start;
+    flex-direction:column
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .guided-playground *{
+    scroll-behavior:auto!important;
+    transition:none!important;
+    animation:none!important
+  }
+}
