@@ -31,6 +31,14 @@ Your system keeps control of execution while KIYT provides the cognitive layer f
 
 Create a workspace and API key in the [console](https://console.kiyt.io), then follow the [quickstart](https://console.kiyt.io/docs/quickstart).
 
+## Project timeline
+
+KIYT changed shape quickly during this hackathon.
+
+- **Days 1–7** — I built the first architecture and learned fast that it was not the right foundation. Instead of forcing it, I rebuilt it.
+- **Two days ago** — I started this repository with a cleaner structure, adapting the strongest parts of my private KIYT MVP repository, which was still at a very early stage.
+- **Today** — The new architecture works end to end. This hackathon helped me simplify the product, find the right technical direction, and turn KIYT into a working MVP.
+
 ---
 
 [Third-party notices](thirdparty/)
